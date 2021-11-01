@@ -7,7 +7,7 @@ import json
 import zipfile
 import re
 
-version = '2.0'
+version = '2.1'
 CR = '\n'
 pagenum = 1
 total_wordcount = 0
@@ -67,6 +67,10 @@ class epub_paginator:
     Paginate an ePub3 using page-list navigation and/or inserting page information footers into the text.
 
     **Release Notes**
+
+    Version 2.1
+
+    1. Now set up as a Github repository with a local copy.
 
     Version 2.0
 
@@ -419,8 +423,11 @@ class epub_paginator:
                 start_text = ebook_data.find('>')
                 real_start_text = start_text + 1
                 end_text = ebook_data.find('</p>')
-                # remove all <> pairs within the paragraph
+#                 # remove all <> pairs within the paragraph
+                # to place word specific page numbers, count word by word.
+                # Insert page number when we reach the words/page value
                 scan_data = ebook_data[real_start_text:end_text]
+                para_wordlist = scan_data.split(' ')
                 para = ''
                 idx = 0
                 while idx < len(scan_data):
