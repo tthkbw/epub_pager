@@ -1,6 +1,7 @@
 import os
 import sys
 from subprocess import PIPE, run
+import time
 
 import xmltodict
 import json
@@ -71,6 +72,13 @@ class epub_paginator:
     Version 2.1
 
     1. Now set up as a Github repository with a local copy.
+    2. Rewrote the scanning algorithm. Scans character by character after
+    <body> element in spine files. Doesn't care about <p> elements or anything
+    else. Still places footer before paragraph where the page ends. Other page
+    numbering is at precise word location. 
+    3. Note that nested <div> elements are created by the placement of footers
+    and this creates errors in epubcheck. However, these errors do not affect
+    Calibre book reader, nor Apple Books.
 
     Version 2.0
 
@@ -107,6 +115,8 @@ class epub_paginator:
 
         **_nav_pagelist_**        -- Create the page_list element in the navigation file.
 
+        **_superscript_**               -- Insert a superscripted page entry
+
         **_epubcheck_**           -- The OS path of epubcheck. If present, epubcheck is run on the created file.
 
         **_DEBUG_**               -- Boolean. If True, print status and debug information while running.
@@ -115,7 +125,7 @@ class epub_paginator:
         self.paged_epub_library = "/Users/tbrown/Documents/projects/BookTally/paged_epubs"
         self.words_per_page = 300
         self.total_pages = 0
-        self.page_footer = True
+        self.page_footer = False
         self.page_number_align = 'center'
         self.page_number_color = 'red'
         self.page_number_bracket = '<'
@@ -123,6 +133,7 @@ class epub_paginator:
         self.chapter_pages = True
         self.chapter_fontsize = '75%'
         self.nav_pagelist = True
+        self.superscript = False
         self.epubcheck = '/opt/homebrew/bin/epubcheck'
         self.DEBUG = False
 
@@ -165,8 +176,8 @@ class epub_paginator:
         pagelist_element += '  <li><a href="' + href + '#page' + str(pagenum) + '">' + str(pagenum) + '</a></li>' + CR
         return 
 
-    def create_pagelink(self,pagenum,section_pagenum, section_pagecount, href):
-        """
+    def create_pagefooter(self,pagenum,section_pagenum, section_pagecount, href):
+        """# {{{
         Create pagelinks for navigation and add to page-list element. 
         Format and return page footer.
 
@@ -179,10 +190,8 @@ class epub_paginator:
 
         href              -- the relative path and filename for the pagelink
 
-        """
+        """# }}}
 
-        # create the pagelink for epub view page numbering
-        pl1 = '<span epub:type="pagebreak" id="page' + str(pagenum) + '"'  + ' title="' + str(pagenum) + '"/>'
         # construct the page footer based on formatting selections
         # brackets
         if self.page_number_bracket=='<':
@@ -195,32 +204,28 @@ class epub_paginator:
             lb = ''
             rb = ''
         #book pages format
-        if self.page_footer==True:
-            if self.page_number_total==True:
-                pagestr_bookpages = lb + str(pagenum) + '/' + str(self.total_pages) + rb
-            else:
-                pagestr_bookpages = lb + str(pagenum) + rb
-
-            #chapter pages format
-            if self.chapter_pages==True:
-                pagestr_chapterpages = ' ' + lb + str(section_pagenum) + '/' + str(section_pagecount) + ' in chapter' + rb
-            else:
-                pagestr_chapterpages = ''
-
-            pagestr = pagestr_bookpages + pagestr_chapterpages
-
-            if self.page_number_color=='none':
-                pl3 = '<p style="font-size:' + self.chapter_fontsize + '; text-align: ' + self.page_number_align + ';margin: 0 0 0 0">' + pagestr + '</p>'
-# the following creates left justified bookpages and right justified chapter pages.
-#             pl3 = '<div> <p style="font-size:75%; float: left; ' + ';margin: 0 0 0 0">' + pagestr_bookpages + '</p>' + '<p style="font-size:75%; float: right; ' + ';margin: 0 0 0 0">' + pagestr_chapterpages + '</p></div><div style="clear: both;"></div>'
-            else:
-                pl3 = '<p style="font-size:' + self.chapter_fontsize + '; text-align: ' + self.page_number_align + '; color: ' + self.page_number_color + ';margin: 0 0 0 0">' + pagestr + '</p>'
-            page_entry = pl1 + pl3 
+        if self.page_number_total==True:
+            pagestr_bookpages = lb + str(pagenum) + '/' + str(self.total_pages) + rb
         else:
-            page_entry = ''
+            pagestr_bookpages = lb + str(pagenum) + rb
+
+        #chapter pages format
+        if self.chapter_pages==True:
+            pagestr_chapterpages = ' ' + lb + str(section_pagenum) + '/' + str(section_pagecount) + ' in chapter' + rb
+        else:
+            pagestr_chapterpages = ''
+
+        pagestr = pagestr_bookpages + pagestr_chapterpages
+
+        if self.page_number_color=='none':
+            page_footer = '<div style="font-size:' + self.chapter_fontsize + '; text-align: ' + self.page_number_align + ';margin: 0 0 0 0">' + pagestr + '</div>'
+# the following creates left justified bookpages and right justified chapter pages.
+#             page_footer = '<div> <p style="font-size:75%; float: left; ' + ';margin: 0 0 0 0">' + pagestr_bookpages + '</p>' + '<p style="font-size:75%; float: right; ' + ';margin: 0 0 0 0">' + pagestr_chapterpages + '</p></div><div style="clear: both;"></div>'
+        else:
+            page_footer = '<div style="font-size:' + self.chapter_fontsize + '; text-align: ' + self.page_number_align + '; color: ' + self.page_number_color + ';margin: 0 0 0 0">' + pagestr + '</div>'
         if self.nav_pagelist:
             self.add_nav_pagelist_target(pagenum, href)
-        return (page_entry)
+        return (page_footer)
 
 
 # Verify that the pub file is one we can work with:
@@ -312,67 +317,38 @@ class epub_paginator:
         book_wordcount = 0
         page_words = 0
         book_pagenum = 1
+        idx = 0
+        footer_list = []
+        # scan until we find '<body' and just copy all the header stuff.
         for chapter in spine_filelist:
             section_pagecount = 0
             with open(unzipped_epub_path + '/'  + chapter['disk_file'], 'r') as ebook_rfile:
                 ebook_data = ebook_rfile.read()
                 if self.DEBUG:
                     print('The word count is ' + '{:,}'.format(book_wordcount) + '.' + CR + 'The page count is ' + '{:,}'.format(book_pagenum))
-            notdone = True
-            start_total = book_wordcount
-            #this is the scan loop counting words and pages
-            while notdone:
-                # the front of the paragraph
-                startp = ebook_data.find('<p')
-                # if we don't find it, must be at end of file, so dump out the data
-                if startp==-1:
-                    notdone = False
-                else:
-                    ebook_data = ebook_data[startp:]
-                    # find the end of the paragraph
-                    # para looks like this <p some html stuff> some text, maybe</p>
-                    # we must find '>' after <p then '</p'
-                    start_text = ebook_data.find('>')
-                    real_start_text = start_text + 1
-                    end_text = ebook_data.find('</p>')
-                    # remove all <> pairs within the paragraph
-                    scan_data = ebook_data[real_start_text:end_text]
-                    para = ''
-                    idx = 0
-                    while idx < len(scan_data):
-                        if scan_data[idx]=='<':
-                            idx += 1
-                            while scan_data[idx]!='>':
-                                idx += 1
-                            idx += 1
-                        else:
-                            para += scan_data[idx]
-                            idx += 1
-                    if para != '':
-                        para = para.split(' ')
-                    if len(para) > 0:
-                        page_words += len(para)
-                        # if we are just starting, put in page number 1
-                        book_wordcount += len(para)
-                    if page_words>self.words_per_page:
-                        book_pagenum += 1
+            body1 = ebook_data.find('<body')
+            if body1==-1:
+                print('No <body> element found.')
+                return 0
+            else:
+                idx = body1
+            while idx < len(ebook_data)-1:
+                if ebook_data[idx]=='<': # we found an html element, just copy it and don't count words
+                    idx += 1
+                    while ebook_data[idx]!='>':
+                        idx += 1
+                    idx += 1 
+                elif ebook_data[idx]==' ': # we found a word boundary
+                    page_words += 1
+                    book_wordcount += 1
+                    if page_words>self.words_per_page: # if page boundary, add a page
                         section_pagecount += 1
-                        page_words -= self.words_per_page
-                        # to get more accurate page count, carry over excess words to next page.
-                        # if the page_words is more than words per page, we
-                        # have paragraphs that are more than a page in length.
-                        # Put in appropriate number of page links to
-                        # accomodate.
-                        extra_pages = True
-                        while extra_pages:
-                            if page_words > self.words_per_page:
-                                print('adding double page ' + str(book_pagenum))
-                                book_pagenum += 1
-                                section_pagecount += 1
-                                page_words -= self.words_per_page
-                            else:
-                                extra_pages = False
-                    ebook_data = ebook_data[end_text:]
+                        book_pagenum += 1
+                        page_words = 0
+                    while ebook_data[idx]==' ': #skip additional whitespace
+                        idx += 1
+                else: # just copy non-white space and non-element stuff
+                    idx += 1
             print('Section page count is: ' + str(section_pagecount))
             #store the section pagecount in the dictionary.
             chapter['section_pagecount'] = section_pagecount
@@ -382,7 +358,7 @@ class epub_paginator:
 #         ebook_data - this is data read from the chapter file
 #         chapter - dictionary containing disk path for unzipped epub file, and href for link creation
     def scan_ebook_file(self,ebook_data,chapter):# {{{
-        """
+        """# {{{
         Scan an section file and place page-links and page footers as appropriate.
         This function is very similar to scan_section, but this one adds the pagelinks and page footers.
 
@@ -392,81 +368,66 @@ class epub_paginator:
 
         chapter    -- dictionary containing the href for use in pagelinks and pages in the section
 
-        """
+        """# }}}
         global pagenum
         global total_wordcount
         global page_wordcount
         global pagelist_element
 
-        # as we scan the file, every time we save the data, we remove the saved
-        # data from the working string. That way, the .find() calls give us a
-        # useful index into the string.
-        notdone = True
+        # new version 2.1. 
+        # scan the file character by character, allowing us to insert page
+        # numbers at the exact word location. For now, put in page-list links
+        # and also superscript in the text. Allow footers to be added. They
+        # would be added following the paragraph where they occurred.
+        idx = 0
         paginated_book = ''
-        start_total = total_wordcount
         section_pagenum = 1
-        while notdone:
-            # the front of the paragraph
-            startp = ebook_data.find('<p')
-            # if we don't find it, must be at end of file, so dump out the data
-            if startp==-1:
-                paginated_book += ebook_data
-                notdone = False
-            else:
-                #save the data
-                if len(ebook_data[:startp])>0:
-                    paginated_book += ebook_data[:startp]
-                ebook_data = ebook_data[startp:]
-                # find the end of the paragraph
-                # para looks like this <p some html stuff> some text, maybe</p>
-                # we must find '>' after <p then '</p'
-                start_text = ebook_data.find('>')
-                real_start_text = start_text + 1
-                end_text = ebook_data.find('</p>')
-#                 # remove all <> pairs within the paragraph
-                # to place word specific page numbers, count word by word.
-                # Insert page number when we reach the words/page value
-                scan_data = ebook_data[real_start_text:end_text]
-                para_wordlist = scan_data.split(' ')
-                para = ''
-                idx = 0
-                while idx < len(scan_data):
-                    if scan_data[idx]=='<':
-                        idx += 1
-                        while scan_data[idx]!='>':
-                            idx += 1
-                        idx += 1
-                    else:
-                        para += scan_data[idx]
-                        idx += 1
-                if para != '':
-                    para = para.split(' ')
-                if len(para) > 0:
-                    page_wordcount += len(para)
-                    # if we are just starting, put in page number 1
-                    total_wordcount += len(para)
-                if page_wordcount>self.words_per_page:
-#                 print('Add page, page_wordcount: ' + str(page_wordcount) + ' words per page is: ' + str(self.words_per_page))
-                    # insert a page link
-                    paginated_book += self.create_pagelink(pagenum,section_pagenum, chapter['section_pagecount'], chapter['href'])
+        footer_list = []
+        # scan until we find '<body' and just copy all the header stuff.
+        body1 = ebook_data.find('<body')
+        if body1==-1:
+            paginated_book += ebook_data
+            print('No <body> element found.')
+            return paginated_book
+        else:
+            paginated_book += ebook_data[:body1]
+            idx = body1
+        while idx < len(ebook_data)-1:
+            if ebook_data[idx]=='<': # we found an html element, just copy it and don't count words
+                if self.page_footer:
+                    if len(footer_list)>0:
+                        for ft in footer_list:
+                            paginated_book += ft
+                    footer_list = []
+                paginated_book += ebook_data[idx]
+                idx += 1
+                while ebook_data[idx]!='>':
+                    paginated_book += ebook_data[idx]
+                    idx += 1
+                paginated_book += ebook_data[idx]
+                idx += 1 
+            elif ebook_data[idx]==' ': # we found a word boundary
+                page_wordcount += 1
+                total_wordcount += 1
+                if page_wordcount>self.words_per_page: # if page boundary, add a page
+                    # insert the superscripted page number
+                    if self.superscript:
+                        paginated_book += '<span style="font-size:75%;vertical-align:super;color:' + self.page_number_color + '">' + str(pagenum) + '</span>'
+                    # insert the page-link entry
+                    if self.nav_pagelist:
+                        paginated_book += '<span epub:type="pagebreak" id="page' + str(pagenum) + '"'  + ' title="' + str(pagenum) + '"/>'
+                        self.add_nav_pagelist_target(pagenum, chapter['href'])
+                    if self.page_footer:
+                        footer_list.append(self.create_pagefooter(pagenum, section_pagenum, chapter['section_pagecount'], chapter['href']))
                     section_pagenum += 1
                     pagenum += 1
-                    page_wordcount -= self.words_per_page
-#                 print('new page_wordcount ' + str(page_wordcount))
-                    # to get more accurate page count, carry over excess words to next page.
-                    # if the page_wordcount is more than words per page, we have paragraphs that are more than a page in length. Put in appropriate number of page links to accomodate.
-                    extra_pages = True
-                    while extra_pages:
-                        if page_wordcount > self.words_per_page:
-                            print('adding double page ' + str(pagenum))
-                            paginated_book += self.create_pagelink(pagenum,section_pagenum, chapter['section_pagecount'], chapter['href'])
-                            pagenum += 1
-                            section_pagenum += 1
-                            page_wordcount -= self.words_per_page
-                        else:
-                            extra_pages = False
-                paginated_book += ebook_data[:end_text]
-                ebook_data = ebook_data[end_text:]
+                    page_wordcount = 0
+                while ebook_data[idx]==' ': #skip additional whitespace
+                    paginated_book += ebook_data[idx]
+                    idx += 1
+            else: # just copy non-white space and non-element stuff
+                paginated_book += ebook_data[idx]
+                idx += 1
         return (paginated_book)# }}}
 
 
@@ -503,6 +464,7 @@ class epub_paginator:
         global pagelist_element
         global nav_file
 
+        t1 = time.perf_counter()
         pagelist_element = '<nav epub:type="page-list" id="page-list"><ol>' + CR
         dirsplit = source_epub.split('/')
         # the epub name is the book file name with spaces removed and '.epub' removed
@@ -537,6 +499,8 @@ class epub_paginator:
         #modify the nav_file to add the pagelist
         if self.nav_pagelist:
             self.update_navfile()
+        t2 = time.perf_counter()
+        print('ePub pagination took ' + '{:.6f}'.format(t2-t1) + ' seconds.')
         # Now build the epub file and check it
         ePubZip(self.paged_epub_library + '/' + book_name + '.epub',self.paged_epub_library + '/' + book_name, epub_filelist) 
         epubcheck_cmd = [self.epubcheck,self.paged_epub_library + '/' + book_name + '.epub']

@@ -13,7 +13,7 @@ Version = '0.7'
 # zip -r SourceDirectory Zipname
 # mv Zipname.zip Zipname.epub
 
-ebook_file = './CloudCuckooLand.epub'
+ebook_file = './Dune_nopara.epub'
 cfg_directory = '/Users/tbrown/.config/BookTally/'
 pagenum = 1
 total_wordcount = 0
@@ -29,12 +29,13 @@ default_config = {
     "words_per_page": 300,
     "page_footer": True,
     "page_number_align": 'right',
-    "page_number_color": 'none',
+    "page_number_color": 'red',
     "page_number_bracket": '<',
     "page_number_total": True,
     "chapter_pages": True,
     "total_pages": 0,
     "nav_pagelist": True,
+    "superscript": False,
     "epubcheck": '/opt/homebrew/bin/epubcheck',
     "DEBUG": False
 }
@@ -87,6 +88,8 @@ paginator.page_number_align = config['page_number_align']
 paginator.page_number_color = config['page_number_color']
 paginator.total_pages = config['total_pages']
 paginator.chapter_pages = config['chapter_pages']
+paginator.superscript = config['superscript']
+paginator.page_footer = config['page_footer']
 paginator.DEBUG = True
 
 paginator.paginate_epub(ebook_file)
