@@ -8,7 +8,7 @@ import json
 import zipfile
 import re
 
-version = '2.1'
+version = '2.2'
 CR = '\n'
 pagenum = 1
 total_wordcount = 0
@@ -68,6 +68,13 @@ class epub_paginator:
     Paginate an ePub3 using page-list navigation and/or inserting page information footers into the text.
 
     **Release Notes**
+
+    Version 2.2
+
+    Fixed bug that mispositioned the page_footer inside italic or other textual
+    html elements and caused epubcheck errors. Page_footers are now properly
+    positioned after the <div> or <p> active element when the page limit is
+    reached.
 
     Version 2.1
 
@@ -394,18 +401,23 @@ class epub_paginator:
             idx = body1
         while idx < len(ebook_data)-1:
             if ebook_data[idx]=='<': # we found an html element, just copy it and don't count words
-                if self.page_footer:
-                    if len(footer_list)>0:
-                        for ft in footer_list:
-                            paginated_book += ft
-                    footer_list = []
+                # if the element is </div> or </p>, after we scan past it, insert any page_footers 
+                html_element = ebook_data[idx]
                 paginated_book += ebook_data[idx]
                 idx += 1
                 while ebook_data[idx]!='>':
+                    html_element += ebook_data[idx]
                     paginated_book += ebook_data[idx]
                     idx += 1
+                html_element += ebook_data[idx]
                 paginated_book += ebook_data[idx]
                 idx += 1 
+                if html_element=='</div>' or html_element=='</p>':
+                    if self.page_footer:
+                        if len(footer_list)>0:
+                            for ft in footer_list:
+                                paginated_book += ft
+                        footer_list = []
             elif ebook_data[idx]==' ': # we found a word boundary
                 page_wordcount += 1
                 total_wordcount += 1

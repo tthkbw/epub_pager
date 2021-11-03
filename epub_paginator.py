@@ -13,7 +13,8 @@ Version = '0.7'
 # zip -r SourceDirectory Zipname
 # mv Zipname.zip Zipname.epub
 
-ebook_file = './Dune_nopara.epub'
+# ebook_file = './Dune_nopara.epub'
+ebook_file = './FarmBoy.epub'
 cfg_directory = '/Users/tbrown/.config/BookTally/'
 pagenum = 1
 total_wordcount = 0
