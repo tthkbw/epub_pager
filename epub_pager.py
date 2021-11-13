@@ -44,7 +44,7 @@ def ePubZip(epub_path,srcfiles_path,epub_filelist):
         for ifile in epub_filelist:
             myzip.write(srcfiles_path + '/' + ifile, ifile, zipfile.ZIP_DEFLATED)
 
-def ePubUnZip(fileName, path):
+def ePubUnZip(fileName, unzip_path):
     """
     Unzip ePub file into a directory
 
@@ -56,11 +56,10 @@ def ePubUnZip(fileName, path):
 
     """
     global epub_filelist
+
     z = zipfile.ZipFile(fileName)
     epub_filelist = z.namelist()
-    for name in epub_filelist:
-        output = str(path+'/'+fileName.replace('.epub', ''))
-        z.extract(name, output)
+    z.extractall(unzip_path)
     z.close()
 
 class epub_paginator:
@@ -482,8 +481,8 @@ class epub_paginator:
         # the epub name is the book file name with spaces removed and '.epub' removed
         stem_name = dirsplit[len(dirsplit)-1].replace(' ','')
         book_name = stem_name.replace('.epub','')
-        ePubUnZip(source_epub,self.paged_epub_library) 
         unzipped_epub_path = self.paged_epub_library + '/' + book_name
+        ePubUnZip(stem_name,unzipped_epub_path) 
         # figure out where everything is and the order they are in.
         spine_filelist = self.scan_spine(unzipped_epub_path)
         # scan the book to count words, section pages and total pages based on words/page
