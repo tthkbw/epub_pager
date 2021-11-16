@@ -1,9 +1,0 @@
-Unfortunately, I am travelling this week, so a more complete response wil have to wait  untiol Momday.
-
-However, here is an error I receive:
-
-ERROR(RSC-005): ./paged_epubs/Dune_nopara.epub/OEBPS/herb_9780441013593_oeb_c01_r1.xhtml(32,231): Error while parsing file: element "div" not allowed here; expected the element end-tag, text, element "a", "abbr", "area", "audio", "b", "bdi", "bdo", "br", "button", "canvas", "cite", "code", "data", "datalist", "del", "dfn", "em", "embed", "epub:switch", "i", "iframe", "img", "input", "ins", "kbd", "label", "link", "map", "mark", "meta", "meter", "ns1:math", "ns2:svg", "object", "output", "picture", "progress", "q", "ruby", "s", "samp", "script", "select", "small", "span", "strong", "sub", "sup", "template", "textarea", "time", "u", "var", "video" or "wbr" (with xmlns:ns1="http://www.w3.org/1998/Math/MathML" xmlns:ns2="http://www.w3.org/2000/svg") or an element from another namespace
-
-and here is the xhtml code that creates it:
-
-
