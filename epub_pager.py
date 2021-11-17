@@ -8,7 +8,7 @@ import json
 import zipfile
 import re
 
-version = '2.2'
+version = '2.4'
 CR = '\n'
 pagenum = 1
 total_wordcount = 0
@@ -21,7 +21,8 @@ href_path = []
 opf_dictkey = 'package'
 logfile_path = ''
 
-# the following two routines are modified from those on GitHub: https://github.com/MJAnand/epub/commit/8980928a74d2f761b2abdb8ef82a951be11b26d5
+# the following two routines are modified from those on GitHub:
+# https://github.com/MJAnand/epub/commit/8980928a74d2f761b2abdb8ef82a951be11b26d5
 
 def ePubZip(epub_path,srcfiles_path,epub_filelist):
     """
@@ -73,6 +74,9 @@ class epub_paginator:
     Paginate an ePub3 using page-list navigation and/or inserting page information footers into the text.
 
     **Release Notes**
+
+    Version 2.4
+    Implement configuration file.
 
     Version 2.3
     Add log file. Program produces minimal output, but puts data in log file.
@@ -126,7 +130,7 @@ class epub_paginator:
 
         **_page_number_color_**   -- Optional color for the footer--if not set, then no color is used.
 
-        **_page_number_bracket_** -- Character (e.g. '<' or '(' ) used to bracket page numbers in page footer. 
+        **_footer_bracket_** -- Character (e.g. '<' or '(' ) used to bracket page numbers in page footer. 
 
         **_page_number_total_**   -- Present the book page number with a total (34/190) in the footer.
 
@@ -147,14 +151,18 @@ class epub_paginator:
         self.words_per_page = 300
         self.total_pages = 0
         self.page_footer = False
-        self.page_number_align = 'center'
-        self.page_number_color = 'red'
-        self.page_number_bracket = '<'
-        self.page_number_total = True
-        self.chapter_pages = True
-        self.chapter_fontsize = '75%'
-        self.nav_pagelist = True
+        self.footer_align = 'right'
+        self.footer_color = 'red'
+        self.footer_bracket = '<'
+        self.footer_fontsize = '75%'
+        self.footer_total = True
         self.superscript = False
+        self.super_color = 'red'
+        self.super_fontsize = '60%'
+        self.super_total = True
+        self.chapter_pages = True
+        self.chapter_bracket = '<'
+        self.nav_pagelist = True
         self.epubcheck = '/opt/homebrew/bin/epubcheck'
         self.DEBUG = False
 
@@ -238,36 +246,102 @@ class epub_paginator:
 
         # construct the page footer based on formatting selections
         # brackets
-        if self.page_number_bracket=='<':
-            lb = '&lt;'
-            rb = '&gt;'
-        elif self.page_number_bracket=='-':
-            lb = '-'
-            rb = '-'
+        if self.footer_bracket=='<':
+            flb = '&lt;'
+            frb = '&gt;'
+        elif self.footer_bracket=='-':
+            flb = '-'
+            frb = '-'
         else:
-            lb = ''
-            rb = ''
+            flb = ''
+            frb = ''
+        if self.chapter_bracket=='<':
+            clb = '&lt;'
+            crb = '&gt;'
+        elif self.chapter_bracket=='-':
+            clb = '-'
+            crb = '-'
+        else:
+            clb = ''
+            crb = ''
         #book pages format
-        if self.page_number_total==True:
-            pagestr_bookpages = lb + str(pagenum) + '/' + str(self.total_pages) + rb
+        if self.footer_total==True:
+            pagestr_bookpages = flb + str(pagenum) + '/' + str(self.total_pages) + frb
         else:
-            pagestr_bookpages = lb + str(pagenum) + rb
+            pagestr_bookpages = flb + str(pagenum) + frb
         #chapter pages format
         if self.chapter_pages==True:
-            pagestr_chapterpages = ' ' + lb + str(section_pagenum) + '/' + str(section_pagecount) + ' in chapter' + rb
+#             pagestr_chapterpages = ' ' + clb + str(section_pagenum) + '/' + str(section_pagecount) + ' in chapter' + crb
+            pagestr_chapterpages = ' ' + clb + str(section_pagenum) + '/' + str(section_pagecount) + crb
         else:
             pagestr_chapterpages = ''
         pagestr = pagestr_bookpages + pagestr_chapterpages
-        if self.page_number_color=='none':
-            page_footer = '<div style="font-size:' + self.chapter_fontsize + '; text-align: ' + self.page_number_align + ';margin: 0 0 0 0">' + pagestr + '</div>'
+        if self.footer_color=='none':
+            if self.footer_align=='float':
+                # the following creates center justified bookpages and right justified chapter pages.
+                page_footer = '<div> <p style="font-size:75%; float: left' + ';margin: 0 0 0 0">' + pagestr_bookpages + '</p>' + '<p style="font-size:75%; float: right; ' + ';margin: 0 0 0 0">' + pagestr_chapterpages + '</p></div><div style="clear: both;"></div>'
+            else:
+                page_footer = '<div style="font-size:' + self.footer_fontsize + '; text-align: ' + self.footer_align + ';margin: 0 0 0 0">' + pagestr + '</div>'
 
-# the following creates left justified bookpages and right justified chapter pages.
-#             page_footer = '<div> <p style="font-size:75%; float: left; ' + ';margin: 0 0 0 0">' + pagestr_bookpages + '</p>' + '<p style="font-size:75%; float: right; ' + ';margin: 0 0 0 0">' + pagestr_chapterpages + '</p></div><div style="clear: both;"></div>'
         else:
-            page_footer = '<div style="font-size:' + self.chapter_fontsize + '; text-align: ' + self.page_number_align + '; color: ' + self.page_number_color + ';margin: 0 0 0 0">' + pagestr + '</div>'
+            if self.footer_align=='float':
+                # the following creates center justified bookpages and right justified chapter pages.
+                page_footer = '<div> <p style="font-size:75%; float: left; color: ' + self.footer_color + ';margin: 0 0 0 0">' + pagestr_bookpages + '</p>' + '<p style="font-size:75%; float: right; color: ' + self.footer_color + ';margin: 0 0 0 0">' + pagestr_chapterpages + '</p></div><div style="clear: both;"></div>'
+            else:
+                page_footer = '<div style="font-size:' + self.footer_fontsize + '; text-align: ' + self.footer_align + '; color: ' + self.footer_color + ';margin: 0 0 0 0">' + pagestr + '</div>'
         if self.nav_pagelist:
             self.add_nav_pagelist_target(pagenum, href)
         return (page_footer)
+
+    def create_superscript(self,pagenum,section_pagenum, section_pagecount):
+        """# {{{
+        Format and return span for superscripted page numbering
+
+        **Keyword arguments:**
+        pagenum           -- the current page number of the book
+
+        section_pagenum   -- the current section page number
+
+        section_pagecount -- the pagecount of the section
+
+        """# }}}
+
+        # construct the page footer based on formatting selections
+        # brackets
+        if self.footer_bracket=='<':
+            flb = '&lt;'
+            frb = '&gt;'
+        elif self.footer_bracket=='-':
+            flb = '-'
+            frb = '-'
+        else:
+            flb = ''
+            frb = ''
+        if self.chapter_bracket=='<':
+            clb = '&lt;'
+            crb = '&gt;'
+        elif self.chapter_bracket=='-':
+            clb = '-'
+            crb = '-'
+        else:
+            clb = ''
+            crb = ''
+        #book pages format
+        if self.super_total==True:
+            pagestr_bookpages = flb + str(pagenum) + '/' + str(self.total_pages) + frb
+        else:
+            pagestr_bookpages = flb + str(pagenum) + frb
+        #chapter pages format
+        if self.chapter_pages==True:
+            pagestr_chapterpages = ' ' + clb + str(section_pagenum) + '/' + str(section_pagecount) + crb
+        else:
+            pagestr_chapterpages = ''
+        pagestr = pagestr_bookpages + pagestr_chapterpages
+        if self.super_color=='none':
+            page_superscript = '<span style="font-size:' + self.super_fontsize + ';vertical-align:super">' + pagestr + '</span>'
+        else:
+            page_superscript = '<span style="font-size:' + self.super_fontsize + ';vertical-align:super;color:' + self.super_color + '">' + pagestr + '</span>'
+        return (page_superscript)
 
     def scan_spine(self, path):
         """
@@ -456,7 +530,7 @@ class epub_paginator:
                 if page_wordcount>self.words_per_page: # if page boundary, add a page
                     # insert the superscripted page number
                     if self.superscript:
-                        paginated_book += '<span style="font-size:75%;vertical-align:super;color:' + self.page_number_color + '">' + str(pagenum) + '</span>'
+                        paginated_book += self.create_superscript(pagenum,section_pagenum,chapter['section_pagecount'])
                     # insert the page-link entry
                     if self.nav_pagelist:
                         paginated_book += '<span epub:type="pagebreak" id="page' + str(pagenum) + '"'  + ' title="' + str(pagenum) + '"/>'

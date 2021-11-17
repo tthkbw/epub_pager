@@ -23,35 +23,32 @@ DEBUG = False
 BookID = 973
 
 default_config = {
-    "rpyc_port": 12345,
-    "tally_json_file": "/Users/tbrown/Documents/projects/BookTally/Books.json",
-    "calibre_library": "/Users/tbrown/Documents/Calibre Library/",
-    "paged_epub_library": "./paged_epubs",
+    "paged_epub_library": "/Users/tbrown/data_store/paged_epubs",
     "words_per_page": 300,
-    "page_footer": True,
-    "page_number_align": 'right',
-    "page_number_color": 'red',
-    "page_number_bracket": '<',
-    "page_number_total": True,
-    "chapter_pages": True,
     "total_pages": 0,
+    "page_footer": True,
+    "footer_align": 'right',
+    "footer_color": 'red',
+    "footer_bracket": '<',
+    "footer_fontsize": '75%',
+    "footer_total": True,
+    "superscript": True,
+    "super_color": 'red',
+    "super_fontsize": '60%',
+    "super_total": True,
+    "chapter_pages": True,
+    "chapter_bracket": '',
     "nav_pagelist": True,
-    "superscript": False,
     "epubcheck": '/opt/homebrew/bin/epubcheck',
     "DEBUG": False
 }
 
 # the config file may be local, which has precedence, or in the ~/.config/BookTally directory
 def read_config():
-    return(default_config)
-    if os.path.exists('./BookTally.cfg'):
-        cfg_file = './BookTally.cfg'
-    if DEBUG:
-        print('config file is ./BookTally.cfg')
-    elif os.path.exists('/Users/tbrown/.config/BookTally/BookTally.cfg'):
-        cfg_file = '/Users/tbrown/.config/BookTally/BookTally.cfg'
-    if DEBUG:
-        print('/Users/tbrown/.config/BookTally/BookTally.cfg')
+    if os.path.exists('./epub_pager.cfg'):
+        cfg_file = './epub_pager.cfg'
+        if DEBUG:
+            print(f'config file is {cfg_file}')
     else:
         if DEBUG:
             print('No config file found!')
@@ -61,6 +58,9 @@ def read_config():
 
 # get the config file to set things up
 config = read_config()
+print('Config file read')
+for dkey in config.keys():
+    print(f'{dkey}: {config[dkey]}; Type: {type(config[dkey])}')
 # connect to server to find files
 # conn = rpyc.connect('m1mini', config['rpyc_port'])
 # current_book = conn.root.GetBookJson(BookID)
@@ -84,13 +84,22 @@ print('Words per page is: ' + str(words_per_page))
 
 paginator = epub_paginator()
 paginator.paged_epub_library = config['paged_epub_library']
-paginator.words_per_page = words_per_page
-paginator.page_number_align = config['page_number_align']
-paginator.page_number_color = config['page_number_color']
+paginator.words_per_page = config['words_per_page']
 paginator.total_pages = config['total_pages']
-paginator.chapter_pages = config['chapter_pages']
-paginator.superscript = config['superscript']
 paginator.page_footer = config['page_footer']
-paginator.DEBUG = True
+paginator.footer_align = config['footer_align']
+paginator.footer_color = config['footer_color']
+paginator.footer_bracket = config['footer_bracket']
+paginator.footer_fontsize = config['footer_fontsize']
+paginator.footer_total = config['footer_total']
+paginator.superscript = config['superscript']
+paginator.super_color = config['super_color']
+paginator.super_fontsize = config['super_fontsize']
+paginator.super_total = config['super_total']
+paginator.chapter_pages = config['chapter_pages']
+paginator.chapter_bracket = config['chapter_bracket']
+paginator.nav_pagelist = config['nav_pagelist']
+paginator.epubcheck = config['epubcheck']
+paginator.DEBUG = config['DEBUG']
 
 paginator.paginate_epub(ebook_file)

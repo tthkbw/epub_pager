@@ -4,9 +4,9 @@ from subprocess import PIPE, run
 import time
 import sys
 
-from packages.epub_pagination import epub_pager
+from epub_pager import epub_paginator
 
-BookFileName = 'Books.json'
+BookFileName = '/Users/tbrown/Documents/projects/BookTally/dev/test/Books.json'
 BookArray = []     # the entire set of dictionaries from the master file
 ActiveBook = 0     # an index into BookArray for the currently active book
 booklist = []      # the list of titles in the BookArray
