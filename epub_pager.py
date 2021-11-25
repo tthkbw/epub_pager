@@ -8,7 +8,7 @@ import json
 import zipfile
 import re
 
-version = '2.5'
+version = '2.8'
 CR = '\n'
 pagenum = 1
 total_wordcount = 0
@@ -20,6 +20,13 @@ href_path = []
 # the dictionary key in the opf file. Usually it is 'package', but some old files use 'opf:package'
 opf_dictkey = 'package'
 logfile_path = ''
+
+return_dict = {
+    "logfile": "",
+    "paged_epub_file": "",
+    "errors": [],
+    "messages": "",
+}
 
 # the following two routines are modified from those on GitHub:
 # https://github.com/MJAnand/epub/commit/8980928a74d2f761b2abdb8ef82a951be11b26d5
@@ -74,6 +81,15 @@ class epub_paginator:
     Paginate an ePub3 using page-list navigation and/or inserting page information footers into the text.
 
     **Release Notes**
+
+    Version 2.8
+    Fixed a bug where the </span> was not removed when removing existingn page links from a converted epub.
+
+    Version 2.7
+    Added return_dict to return a set of data to the calling program, including what used to go to stdout
+
+    Version 2.6
+    Fixed a bug in logic that removes pagebreak elements from converted epub2 books.
 
     Version 2.5
     Implemented conversion of epub2 to epub3 using calibre ebook-converter.
@@ -215,8 +231,10 @@ class epub_paginator:
 
         """
         global logfile_path
+        global return_dict
         if (stdout):
-            print(message)
+#             print(message)
+            return_dict['messages'] += '\n' + message
         with open(logfile_path+'.log','a') as logfile:
             logfile.write(message + '\n')
 
@@ -383,6 +401,7 @@ class epub_paginator:
 
         **_path_** -- the os path to the unzipped ePub files.
 
+        returns spine_filelist
         """
         global nav_file
 
@@ -466,6 +485,7 @@ class epub_paginator:
             body1 = ebook_data.find('<body')
             if body1==-1:
 #                 print('No <body> element found.')
+                return_dict['errors'].append(f"No <body> element found. File: {chapter['disk_file']}")
                 return 0
             else:
                 idx = body1
@@ -530,6 +550,7 @@ class epub_paginator:
         if body1==-1:
             paginated_book += ebook_data
 #             print('No <body> element found.')
+            return_dict['errors'].append(f"No <body> element found. File: {chapter['disk_file']}")
             return paginated_book
         else:
             paginated_book += ebook_data[:body1]
@@ -548,7 +569,19 @@ class epub_paginator:
 #                 paginated_book += ebook_data[idx]
                 idx += 1 
                 # if span element with pagebreak and a converted book, then don't put in the book, remove it.
-                if (html_element.find('span') == -1) and (html_element.find('pagebreak') == -1) and (ebookconverted==True):
+                if (html_element.find('span') != -1) and (html_element.find('pagebreak') != -1) and (ebookconverted==True):
+                    self.write_log(True,f'Removing html element: {html_element}')
+                    # but we must also remove the </span>
+#                     self.write_log(True,f'finding </span>; current char is {idx}')
+                    if ebook_data[idx]=='<':
+#                         self.write_log(True,f'finding </span>')
+                        html_element = ebook_data[idx]
+                        while ebook_data[idx]!='>':
+                            idx += 1
+                            html_element += ebook_data[idx]
+                        self.write_log(True,f'Removing html element: {html_element}')
+                        idx += 1
+                else:
                     paginated_book += html_element
 
                 if html_element=='</div>' or html_element=='</p>':
@@ -566,7 +599,7 @@ class epub_paginator:
                         paginated_book += self.create_superscript(pagenum,section_pagenum,chapter['section_pagecount'])
                     # insert the page-link entry
                     if self.nav_pagelist:
-                        paginated_book += '<span epub:type="pagebreak" id="page' + str(pagenum) + '"'  + ' title="' + str(pagenum) + '"/>'
+                        paginated_book += '<span epub:type="pagebreak" id="page' + str(pagenum) + '"'  + ' role="doc-pagebreak" ' + ' title="' + str(pagenum) + '"/>'
                         self.add_nav_pagelist_target(pagenum, chapter['href'])
                     if self.page_footer:
                         footer_list.append(self.create_pagefooter(pagenum, section_pagenum, chapter['section_pagecount'], chapter['href']))
@@ -615,6 +648,7 @@ class epub_paginator:
         global nav_file
         global epub_filelist
         global logfile_path
+        global return_dict
 
         t1 = time.perf_counter()
         # re-initialize on each call
@@ -633,6 +667,8 @@ class epub_paginator:
         stem_name = dirsplit[len(dirsplit)-1].replace(' ','')
         book_name = stem_name.replace('.epub','')
         logfile_path = f'{self.paged_epub_library}/{book_name}'
+        return_dict['logfile'] = logfile_path + '.log'
+        return_dict['paged_epub_file'] = logfile_path+'.epub'
         with open(logfile_path+'.log','w') as logfile:
             logfile.write(''+'\n')
         self.write_log(True,'---------------------------')
@@ -642,13 +678,16 @@ class epub_paginator:
         # first get the epub_version
         epub_version = self.get_epub_version(source_epub)
         if epub_version=='no_version':
-            return (1)
+            return_dict['errors'].append('Version was not found in the ePub file.')
+            return (return_dict)
         vnum = float(epub_version)
+        ebookconverted = False
         if vnum < 3.0:
-            ebookconverted = False
+            if self.DEBUG:
+                self.write_log(True,'Handling epub 2')
             # if convert is set, then convert to epub3 first
             if self.ebookconvert!='none':
-                self.write_log(True,'    Converting to epub3')
+                self.write_log(True,'    Converting to epub3 using {self.ebookconvert}')
                 ebookconverted = True
                 epub3_file = source_epub.replace('.epub','_epub3.epub')
                 ebookconvert_cmd = [self.ebookconvert,source_epub,epub3_file, '--epub-version', '3']
@@ -662,7 +701,8 @@ class epub_paginator:
                 else:
                     self.write_log(True, 'Conversion to epub3 failed. Conversion reported:')
                     self.write_log(True, result.stderr)
-                    return(2)
+                    return_dict['errors'].append('Conversion to epub3 failed.')
+                    return(return_dict)
             else:
                 self.write_log(False, "    --> WARNING <-- Epub version is not 3 or newer, page-link navigation disabled.")
                 self.write_log(False, "    --> WARNING <-- To enable page-link navigation, convert to Epub3 and try again.")
@@ -723,4 +763,4 @@ class epub_paginator:
                 self.write_log(False, result.stderr)
             self.write_log(True,'---------------------------')
             self.write_log(True,'\n')
-        return(0)
+        return(return_dict)

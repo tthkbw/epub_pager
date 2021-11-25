@@ -170,4 +170,16 @@ paginator.ebookconvert = args.ebookconvert
 paginator.epubcheck = args.epubcheck
 paginator.DEBUG = args.DEBUG
 
-paginator.paginate_epub(args.ePub_file)
+return_dict = paginator.paginate_epub(args.ePub_file)
+
+print('---> Dumping return_dict')
+print()
+print(f"Paginated ebook created: {return_dict['paged_epub_file']}")
+print(f"Paginated ebook log: {return_dict['logfile']}")
+if len(return_dict['errors'])>0:
+    print('Errors were reported:')
+    for perror in return_dict['errors']:
+        print(perror)
+else:
+    print('No errors reported.')
+print(return_dict['messages'])
