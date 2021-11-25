@@ -8,7 +8,7 @@ import json
 import zipfile
 import re
 
-version = '2.8'
+version = '2.9'
 CR = '\n'
 pagenum = 1
 total_wordcount = 0
@@ -81,6 +81,10 @@ class epub_paginator:
     Paginate an ePub3 using page-list navigation and/or inserting page information footers into the text.
 
     **Release Notes**
+
+    Version 2.9
+    Add the role="doc-pagebreak" to the page links. This appears to fix the bug
+    that resulted in iBooks not showing all the page numbers in the margin.
 
     Version 2.8
     Fixed a bug where the </span> was not removed when removing existingn page links from a converted epub.
@@ -332,8 +336,8 @@ class epub_paginator:
                 page_footer = '<div> <p style="font-size:75%; float: left; color: ' + self.footer_color + ';margin: 0 0 0 0">' + pagestr_bookpages + '</p>' + '<p style="font-size:75%; float: right; color: ' + self.footer_color + ';margin: 0 0 0 0">' + pagestr_chapterpages + '</p></div><div style="clear: both;"></div>'
             else:
                 page_footer = '<div style="font-size:' + self.footer_fontsize + '; text-align: ' + self.footer_align + '; color: ' + self.footer_color + ';margin: 0 0 0 0">' + pagestr + '</div>'
-        if self.nav_pagelist:
-            self.add_nav_pagelist_target(pagenum, href)
+#         if self.nav_pagelist:
+#             self.add_nav_pagelist_target(pagenum, href)
         return (page_footer)
 
     def create_superscript(self,pagenum,section_pagenum, section_pagecount):
