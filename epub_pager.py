@@ -20,6 +20,7 @@ href_path = []
 # the dictionary key in the opf file. Usually it is 'package', but some old files use 'opf:package'
 opf_dictkey = 'package'
 logfile_path = ''
+match_pages = False
 
 return_dict = {
     "logfile": "",
@@ -385,9 +386,11 @@ class epub_paginator:
             pagestr_chapterpages = ''
         pagestr = pagestr_bookpages + pagestr_chapterpages
         if self.super_color=='none':
-            page_superscript = '<span style="font-size:' + self.super_fontsize + ';vertical-align:super">' + pagestr + '</span>'
+            page_superscript = f'<span style="font-size:{self.super_fontsize};vertical-align:super">{pagestr}</span>'
+
         else:
-            page_superscript = '<span style="font-size:' + self.super_fontsize + ';vertical-align:super;color:' + self.super_color + '">' + pagestr + '</span>'
+            page_superscript = f'<span style="font-size:{self.super_fontsize};vertical-align:super"color:{self.super_color}>{pagestr}</span>'
+#             page_superscript = '<span style="font-size:' + self.super_fontsize + ';vertical-align:super;color:' + self.super_color + '">' + pagestr + '</span>'
         return (page_superscript)
 
     def scan_spine(self, path):
@@ -442,6 +445,7 @@ class epub_paginator:
                                 self.write_log(True,'    ->INFO<- This epub file already has a page-list navigation element.')
                                 self.write_log(True,'    ->INFO<- page-list navigation was selected but will not be created.')
                                 self.nav_pagelist = False
+                                match_pages = True
         # we're good to go
         spine_filelist = []
         for spine_item in opf_dict[opf_dictkey]['spine']['itemref']:
@@ -603,7 +607,125 @@ class epub_paginator:
                         paginated_book += self.create_superscript(pagenum,section_pagenum,chapter['section_pagecount'])
                     # insert the page-link entry
                     if self.nav_pagelist:
-                        paginated_book += '<span epub:type="pagebreak" id="page' + str(pagenum) + '"'  + ' role="doc-pagebreak" ' + ' title="' + str(pagenum) + '"/>'
+                        pstr = f'<span epub:type="pagebreak" id="page{pagenum}" '
+                        pstr += f' role="doc-pagebreak" title="{pagenum}"/>'
+                        paginated_book += pstr
+                        self.add_nav_pagelist_target(pagenum, chapter['href'])
+                    if self.page_footer:
+                        footer_list.append(self.create_pagefooter(pagenum, section_pagenum, chapter['section_pagecount'], chapter['href']))
+                    section_pagenum += 1
+                    pagenum += 1
+                    page_wordcount = 0
+                while ebook_data[idx]==' ': #skip additional whitespace
+                    paginated_book += ebook_data[idx]
+                    idx += 1
+            else: # just copy non-white space and non-element stuff
+                paginated_book += ebook_data[idx]
+                idx += 1
+        return (paginated_book)# }}}
+
+    def match_ebook_file(self,ebook_data,chapter,ebookconverted):# {{{
+        """# {{{
+        Called when the ebook already has page links and we are told to insert
+        footers/superscripts matching existing paging.
+        Scan a section file and place page-links, page footers, superscripts as appropriate.
+        This function is very similar to scan_section, but this one adds the pagelinks and page footers.
+
+        **Keyword arguments:**
+
+        **_ebook_data_**      -- the data read from the section file
+
+        **_chapter_**         -- dictionary containing the href for use in pagelinks and pages in the section
+
+        **_ebookconverted_**  -- Boolean indicating if this ebook was converted from ePub version 2
+
+        """# }}}
+
+        
+        # TODO
+        '''
+        1. write a routine that parses a page-list entry to find the max page number
+        2. write a routine that grabs the page number from a epub:type="pagebreak" element.
+        3. write a routine that scans the epub file and finds the count of pages in the section.
+        '''
+        idx = 0
+        paginated_book = ''
+        section_pagenum = 1
+        footer_list = []
+        # just find existing pagebreak entries
+        not_done = True
+        while not_done:
+            plink_loc = ebook_data.find('epub:type="pagebreak"')
+            if plink_loc==-1:
+                paginated_book += ebook_data
+                not_done = False
+            else:
+                #update the string
+                ebook_data = ebook_data[plink_loc:]
+                # find the pagenumber
+                loc = ebook_data.find('title=')
+                if loc == -1:
+                    self.write_log(True,'Did not find title for page link')
+                else:
+                    ebook_data = ebook_data[loc:]
+                    qlist = ebook_data.split('"')
+                    thispage = qlist[1]
+        body1 = ebook_data.find('<body')
+        if body1==-1:
+            paginated_book += ebook_data
+#             print('No <body> element found.')
+            return_dict['errors'].append(f"No <body> element found. File: {chapter['disk_file']}")
+            return paginated_book
+        else:
+            paginated_book += ebook_data[:body1]
+            idx = body1
+        while idx < len(ebook_data)-1:
+            if ebook_data[idx]=='<': # we found an html element, just copy it and don't count words
+                # if the element is </div> or </p>, after we scan past it, insert any page_footers 
+                html_element = ebook_data[idx]
+#                 paginated_book += ebook_data[idx]
+                idx += 1
+                while ebook_data[idx]!='>':
+                    html_element += ebook_data[idx]
+#                     paginated_book += ebook_data[idx]
+                    idx += 1
+                html_element += ebook_data[idx]
+#                 paginated_book += ebook_data[idx]
+                idx += 1 
+                # if span element with pagebreak and a converted book, then don't put in the book, remove it.
+                if (html_element.find('span') != -1) and (html_element.find('pagebreak') != -1) and (ebookconverted==True):
+                    self.write_log(True,f'Removing html element: {html_element}')
+                    # but we must also remove the </span>
+#                     self.write_log(True,f'finding </span>; current char is {idx}')
+                    if ebook_data[idx]=='<':
+#                         self.write_log(True,f'finding </span>')
+                        html_element = ebook_data[idx]
+                        while ebook_data[idx]!='>':
+                            idx += 1
+                            html_element += ebook_data[idx]
+                        self.write_log(True,f'Removing html element: {html_element}')
+                        idx += 1
+                else:
+                    paginated_book += html_element
+
+                if html_element=='</div>' or html_element=='</p>':
+                    if self.page_footer:
+                        if len(footer_list)>0:
+                            for ft in footer_list:
+                                paginated_book += ft
+                        footer_list = []
+            elif ebook_data[idx]==' ': # we found a word boundary
+                page_wordcount += 1
+                total_wordcount += 1
+                if page_wordcount>self.words_per_page: # if page boundary, add a page
+                    # insert the superscripted page number
+                    if self.superscript:
+                        paginated_book += self.create_superscript(pagenum,section_pagenum,chapter['section_pagecount'])
+                    # insert the page-link entry
+                    if self.nav_pagelist:
+                        pstr = f'<span epub:type="pagebreak" id="page{pagenum}" '
+                        pstr += f' role="doc-pagebreak" title="{pagenum}"/>'
+                        paginated_book += pstr
                         self.add_nav_pagelist_target(pagenum, chapter['href'])
                     if self.page_footer:
                         footer_list.append(self.create_pagefooter(pagenum, section_pagenum, chapter['section_pagecount'], chapter['href']))
