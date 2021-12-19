@@ -1,24 +1,16 @@
 #!/opt/homebrew/bin/python3
 
-import os
 import rpyc
 import json
 import sys
 import argparse
+from pathlib import Path
 from epub_pager import epub_paginator
 
 Version = '1.0'
 # Version 1.0
 # Added argparse for parsing command line options. There are options to set and
-# default values for every option that epub_pager supports.  
-
-# Version 0.7 includes configuration stuff.
-
-pagenum = 1
-total_wordcount = 0
-page_wordcount = 0
-DEBUG = False
-BookID = 973
+# default values for every option that epub_pager supports.
 
 default_cfg = {
     "outdir": "/Users/tbrown/data_store/paged_epubs",
@@ -153,61 +145,38 @@ args = parser.parse_args()
 
 
 def get_config(args):
-    if len(args.cfg) > 0:
-        if os.path.exists(args.cfg):
-            print(f'Using config file {args.cfg}')
-            with open(args.cfg, 'r') as config_file:
-                return(json.loads(config_file.read()))
-        else:
-            if DEBUG:
-                print('Configuration file {cfg_file} not found!')
+    cfile = Path(args.cfg)
+    if cfile.exists():
+        print(f'Using config file {args.cfg}')
+        with cfile.open('r') as config_file:
+            return(json.loads(config_file.read()))
     else:
-        # no config file, build the config from the parameters
-        config = {}
-        config["outdir"] = args.outdir
-        config["match"] = args.match
-        config["genplist"] = args.genplist
-        config["pgwords"] = args.pgwords
-        config["pages"] = args.pages
-        config["footer"] = args.footer
-        config["ft_align"] = args.ft_align
-        config["ft_color"] = args.ft_color
-        config["ft_bkt"] = args.ft_bkt
-        config["ft_fntsz"] = args.ft_fntsz
-        config["ft_pgtot"] = args.ft_pgtot
-        config["superscript"] = args.superscript
-        config["super_color"] = args.super_color
-        config["super_fntsz"] = args.super_fntsz
-        config["super_total"] = args.super_total
-        config["chap_pgtot"] = args.chap_pgtot
-        config["chap_bkt"] = args.chap_bkt
-        config["ebookconvert"] = args.ebookconvert
-        config["epubcheck"] = args.epubcheck
-        config["DEBUG"] = args.DEBUG
-        return(config)
-
-# print('configuration:')
-# print(f"Output file: {args.ePub_file}")
-# print(f"outdir: {args.outdir}")
-# print(f"match: {args.match}")
-# print(f"genplist: {args.genplist}")
-# print(f"pgwords: {args.pgwords}")
-# print(f"pages: {args.pages}")
-# print(f"footer: {args.footer}")
-# print(f"ft_align: {args.ft_align}")
-# print(f"ft_color: {args.ft_color}")
-# print(f"ft_bkt: {args.ft_bkt}")
-# print(f"ft_fntsz: {args.ft_fntsz}")
-# print(f"ft_pgtot: {args.ft_pgtot}")
-# print(f"superscript: {args.superscript}")
-# print(f"super_color: {args.super_color}")
-# print(f"super_fntsz: {args.super_fntsz}")
-# print(f"super_total: {args.super_total}")
-# print(f"chap_pgtot: {args.chap_pgtot}")
-# print(f"chap_bkt: {args.chap_bkt}")
-# print(f"ebookconvert: {args.ebookconvert}")
-# print(f"epubcheck: {args.epubcheck}")
-# print(f"DEBUG: {args.DEBUG}")
+        if DEBUG:
+            print('Configuration file {cfg_file} not found!')
+        else:
+            # no config file, build the config from the parameters
+            config = {}
+            config["outdir"] = args.outdir
+            config["match"] = args.match
+            config["genplist"] = args.genplist
+            config["pgwords"] = args.pgwords
+            config["pages"] = args.pages
+            config["footer"] = args.footer
+            config["ft_align"] = args.ft_align
+            config["ft_color"] = args.ft_color
+            config["ft_bkt"] = args.ft_bkt
+            config["ft_fntsz"] = args.ft_fntsz
+            config["ft_pgtot"] = args.ft_pgtot
+            config["superscript"] = args.superscript
+            config["super_color"] = args.super_color
+            config["super_fntsz"] = args.super_fntsz
+            config["super_total"] = args.super_total
+            config["chap_pgtot"] = args.chap_pgtot
+            config["chap_bkt"] = args.chap_bkt
+            config["ebookconvert"] = args.ebookconvert
+            config["epubcheck"] = args.epubcheck
+            config["DEBUG"] = args.DEBUG
+            return(config)
 
 # get the config file to set things up
 config = get_config(args)
@@ -234,39 +203,30 @@ paginator.chap_bkt = config['chap_bkt']
 paginator.ebookconvert = config['ebookconvert']
 paginator.epubcheck = config['epubcheck']
 paginator.DEBUG = config['DEBUG']
-# paginator.outdir = args.outdir
-# paginator.match = args.match
-# paginator.genplist = args.genplist
-# paginator.pgwords = args.pgwords
-# paginator.pages = args.pages
-# paginator.footer = args.footer
-# paginator.ft_align = args.ft_align
-# paginator.ft_color = args.ft_color
-# paginator.ft_bkt = args.ft_bkt
-# paginator.ft_fntsz = args.ft_fntsz
-# paginator.ft_pgtot = args.ft_pgtot
-# paginator.superscript = args.superscript
-# paginator.super_color = args.super_color
-# paginator.super_fntsz = args.super_fntsz
-# paginator.super_total = args.super_total
-# paginator.chap_pgtot = args.chap_pgtot
-# paginator.chap_bkt = args.chap_bkt
-# paginator.ebookconvert = args.ebookconvert
-# paginator.epubcheck = args.epubcheck
-# paginator.DEBUG = args.DEBUG
 
 return_dict = paginator.paginate_epub(args.ePub_file)
 
-print('---> Dumping return_dict')
 print()
 print(f"Paginated ebook created: {return_dict['bk_outfile']}")
 print(f"Paginated ebook log: {return_dict['logfile']}")
-if len(return_dict['errors']) > 0:
-    print('Errors were reported:')
-    for perror in return_dict['errors']:
-        print(perror)
-else:
-    print('No errors reported.')
+error = False
+print()
+if return_dict['fatal']:
+    error = True
+    print(f"--> Fatal Error reported.")
+    for error in return_dict['errors']:
+        print(f' ----> {error}')
+if return_dict['echk_fatal']:
+    error = True
+    print(f"--> Fatal error reported in epubcheck.")
+if return_dict['echk_error']:
+    error = True
+    print(f"--> Error reported in epubcheck.")
+if return_dict['echk_warn']:
+    error = True
+    print(f"--> Warning reported in epubcheck.")
+if not error:
+    print('No errors detected.')
 # print out the epub info structure
 # print(return_dict['epub_info'].items())
 print(return_dict['messages'])

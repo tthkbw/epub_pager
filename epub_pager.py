@@ -1,7 +1,7 @@
-import os
 import sys
 from subprocess import PIPE, run
 import time
+from pathlib import Path
 
 import xmltodict
 import json
@@ -9,6 +9,8 @@ import zipfile
 
 CR = '\n'
 opf_dictkey = 'package'
+epubns = 'xmlns:epub="http://www.idpf.org/2011/epub"'
+# epubns = 'xmlns:epub="http://www.idpf.org/2007/ops"'
 
 
 class epub_paginator:
@@ -17,6 +19,29 @@ class epub_paginator:
     information footers and/or superscripts into the text.
 
     **Release Notes**
+
+    **Version 2.95**
+    Fixing bugs and doing extensive testing with hundreds of epubs.
+
+    1. Fixed a problem with removing existing pagebreaks in a converted
+    epub2 book.
+    1. Parsed the epubcheck stdout to find Messages and report fatal and
+    other errors.
+    1. Fixed a problem where matching missed pages because it was
+    looking for a </span> after the epub:type="pagebreak" element.
+    Should look for '/>' instead.
+    1. Additional fixes that allow proper identification and handling of
+    epubs that use 'aria' features and don't have epub:type in
+    pagebreaks.
+    1. Major fix--we no longer scan and word count anything before
+    <body. Then, no pagelinks appear outside of <body and this makes
+    epubcheck happier.
+    1. When the epub:type page-list is added, also add the namespace
+    because it is not there sometimes and being repetitive doesn't
+    matter.
+    1. Fixed a bug where <span> was not removed correctly. Now checks
+    for /> as end of span rather than assuming </span> is the element
+    terminator.
 
     **Version 2.94**
 
@@ -139,13 +164,19 @@ class epub_paginator:
     plist = ''       # the page-list element for the nav file
     bk_flist = []    # list of all files in the epub
     logpath = ''     # path for the logfile
+    epub_file = ''   # this will be the epub to paginate
 
-    rdict = {              # data to return to calling program
-        "logfile": "",     # logfile location and name
-        "bk_outfile": "",  # modified epub file name and location
-        "errors": [],      # list of errors that occurred
-        "fatal": False,    # Was there a fatal error?
-        "messages": ""     # list of messages generated.
+    rdict = {                # data to return to calling program
+        "logfile": "",       # logfile location and name
+        "bk_outfile": "",    # modified epub file name and location
+        "errors": [],        # list of errors that occurred
+        "fatal": False,      # Was there a fatal error?
+        "error": False,      # epub_pager error
+        "warn": False,       # epub_pager warning
+        "echk_fatal": False, # epubcheck fatal error
+        "echk_error": False, # epubcheck error
+        "echk_warn": False,  # epubcheck warning
+        "messages": ""       # list of messages generated.
     }
 
     def __init__(self):
@@ -296,7 +327,7 @@ class epub_paginator:
                 if self.DEBUG:
                     self.wrlog(False, 'bk_flist: ')
                     self.wrlog(False, bk_flist)
-                sys.exit()
+                sys.exit('Fatal error, no mimetype file was found.')
         with zipfile.ZipFile(epub_path, 'a', zipfile.ZIP_DEFLATED) as myzip:
             for ifile in bk_flist:
                 myzip.write(f"{srcfiles_path}/{ifile}",
@@ -327,9 +358,9 @@ class epub_paginator:
 
         return(self.version)
 
-    def get_bkinfo(self, epub_file):
+    def get_bkinfo(self):
         """
-        Gather useful information about the ebub file and put it in the
+        Gather useful information about the epub file and put it in the
         bkinfo dictionary.
 
         **Instance Variables**
@@ -338,17 +369,35 @@ class epub_paginator:
 
         """
 
+        self.bkinfo = {
+            "version": "",
+            "converted": False,
+            "title": "",
+            "unzip_path": "",
+            "has_plist": False,
+            "match": False,
+            "has_pbreaks": False,
+            "nav_file": "None",
+            "spine_lst": [],
+            "words": 0,
+            "pages": 0
+        }
         # The epub name is the book file name with spaces removed and '.epub'
         # removed.
-        dirsplit = epub_file.split('/')
+        dirsplit = self.epub_file.split('/')
         stem_name = dirsplit[len(dirsplit)-1].replace(' ', '')
         self.bkinfo['title'] = stem_name.replace('.epub', '')
-        self.logpath = (f"{self.outdir}/"
-                        f"{self.bkinfo['title']}")
-        self.rdict['logfile'] = f'{self.logpath}.log'
-        self.rdict['bk_outfile'] = f'{self.logpath}.epub'
-        with open(self.logpath+'.log', 'w') as logfile:
+        self.logpath = Path(f"{self.outdir}/" f"{self.bkinfo['title']}.log")
+        self.rdict['logfile'] = self.logpath
+        bkout = f"{self.outdir}/{self.bkinfo['title']}.epub"
+        self.rdict['bk_outfile'] = bkout
+        with self.logpath.open('w') as logfile:
             logfile.write(''+'\n')
+        if not Path(self.epub_file).is_file():
+            self.wrlog(True, 'Source epub not found.')
+            self.rdict['errors'].append("Source epub not found.")
+            self.rdict['fatal'] = True
+            return(self.rdict)
         self.wrlog(True, '---------------------------')
         self.wrlog(True,  f"epub_paginator version {self.get_version()}")
         self.wrlog(True,  f'Paginating {dirsplit[len(dirsplit)-1]}')
@@ -376,7 +425,7 @@ class epub_paginator:
         self.wrlog(False, f'  DEBUG: {self.DEBUG}')
 
         # first get the epub_version
-        self.bkinfo['version'] = self.get_epub_version(epub_file)
+        self.bkinfo['version'] = self.get_epub_version(self.epub_file)
         if self.bkinfo['version'] == 'no_version':
             estr = 'Version was not found in the ePub file.'
             self.rdict['errors'].append(estr)
@@ -391,12 +440,12 @@ class epub_paginator:
                 self.wrlog(True,
                            (f'    Converting to epub3 using '
                             f'{self.ebookconvert}'))
-                epub3_file = epub_file.replace('.epub', '_epub3.epub')
-                ebkcvrt_cmd = [self.ebookconvert,
-                               epub_file,
-                               epub3_file,
-                               '--epub-version',
-                               '3']
+                epub3_file = self.epub_file.replace('.epub', '_epub3.epub')
+                ebkcnvrt_cmd = [self.ebookconvert,
+                                self.epub_file,
+                                epub3_file,
+                                '--epub-version',
+                                '3']
                 result = run(ebkcnvrt_cmd,
                              stdout=PIPE,
                              stderr=PIPE,
@@ -404,14 +453,25 @@ class epub_paginator:
                 if result.returncode == 0:
                     self.wrlog(False, 'Conversion log:')
                     self.wrlog(False, result.stdout)
-                    epub_file = epub3_file
-                    lstr = f'Paginating epub3 file: {epub_file}'
+                    self.epub_file = epub3_file
+                    self.wrlog(True,
+                               f'epub converted - now paginating new file.')
+                    lstr = f'Paginating epub3 file: {self.epub_file}'
                     self.wrlog(True, lstr)
-                    plstr = ('<nav epub:type="page-list" id="page-list" '
+                    # plstr = (f'<nav epub:type="page-list" id="page-list {epubns} " '
+                    plstr = (f'<nav {epubns} epub:type="page-list" id="page-list" '
                              'hidden="hidden"><ol>') + CR
                     self.plist = plstr
                     self.bkinfo['converted'] = True
-                    self.bkinfo['version'] = '3.0'
+                    # now try again on version
+                    v = self.get_epub_version(self.epub_file)
+                    self.bkinfo['version'] = v
+                    if self.bkinfo['version'] == 'no_version':
+                        estr = ('After conversion, version was not '
+                                'found in the ePub file.')
+                        self.rdict['errors'].append(estr)
+                        self.rdict['fatal'] = True
+                        return
                 else:
                     lstr = 'Conversion to epub3 failed. Conversion reported:'
                     self.wrlog(True, lstr)
@@ -430,8 +490,9 @@ class epub_paginator:
                 self.genplist = False
                 self.match = False
         else:
-            self.plist = ('<nav epub:type="page-list" '
-                          'id="page-list" hidden="hidden"><ol>' + CR)
+            self.plist = (f'<nav {epubns} epub:type="page-list" '
+                          f'id="page-list" hidden="hidden"><ol>'
+                          '\n')
         self.bkinfo['unzip_path'] = f"{self.outdir}/{self.bkinfo['title']}"
 
     def get_epub_version(self, epub_file):
@@ -475,14 +536,14 @@ class epub_paginator:
 
         """
 
-        with open(self.bkinfo['nav_file'], 'r') as nav_r:
+        with self.bkinfo['nav_file'].open('r') as nav_r:
             nav_data = nav_r.read()
-        loc = nav_data.find('<nav epub:type="page-list"')
+        loc = nav_data.find('epub:type="page-list"')
         if loc == -1:
             # this should never happen since we get here only after the entry
             # was found
-            print('Error! oops, the page-list entry was not found!')
-            sys.exit(0)
+            sys.exit(('Error! oops, the page-list entry was not found '
+                      'after having been initially found.'))
         nav_data = nav_data[loc:]
         not_done = True
         max_page = 0
@@ -527,10 +588,12 @@ class epub_paginator:
         The message to print
 
         """
+        '''
         if (stdout):
             print(message)
             self.rdict['messages'] += '\n' + message
-        with open(self.logpath+'.log', 'a') as logfile:
+        '''
+        with self.logpath.open('a') as logfile:
             logfile.write(message + '\n')
 
     def update_navfile(self):
@@ -538,16 +601,16 @@ class epub_paginator:
         Add generated page-list element to the ePub navigation file
         """
 
-        with open(self.bkinfo['nav_file'], 'r') as nav_file_read:
+        with self.bkinfo['nav_file'].open('r') as nav_file_read:
             nav_data = nav_file_read.read()
         pagelist_loc = nav_data.find('</body>')
         new_nav_data = nav_data[:pagelist_loc]
         new_nav_data += self.plist
-        with open(self.bkinfo['nav_file'], 'w') as nav_file_write:
+        with self.bkinfo['nav_file'].open('w') as nav_file_write:
             nav_file_write.write(new_nav_data)
             nav_file_write.write(nav_data[pagelist_loc:])
 
-    def add_genplist_target(self, curpg, href):
+    def add_plist_target(self, curpg, href):
         """
         Generate page-list entry and page footer and add them to a
         string that accumulates them for placement in the navigation
@@ -745,41 +808,47 @@ class epub_paginator:
         """
 
         # find the opf file using the META-INF/container.xml file
-        with open(f"{path}/META-INF/container.xml", 'r') as container_file:
+        confile = Path(f"{path}/META-INF/container.xml")
+        with confile.open('r') as container_file:
             xd = xmltodict.parse(container_file.read())
             opf_file = xd['container']['rootfiles']['rootfile']['@full-path']
             opf_path = opf_file.split('/')
             disk_path = ''
-            if len(opf_path) > 1:
+            if opf_path:
                 for index in range(0, len(opf_path)-1):
                     disk_path += f"{opf_path[index]}/"
-            opf_filename = f"{path}/{opf_file}"
+            else:
+                self.rdict['fatal'] = True
+                self.wrlog(True, 'Fatal error: opf file not found')
+                return
+            opf_filep = Path(f"{path}/{opf_file}")
 
         # read the opf file and find nav file
-        with open(opf_filename, 'r') as opf_file:
+        with opf_filep.open('r') as opf_file:
             opf_dict = xmltodict.parse(opf_file.read())
         # be sure we find a nav file
             if self.genplist:
                 for item in opf_dict[opf_dictkey]['manifest']['item']:
-                        if item.get('@properties') == 'nav':
-                            lstr = f"{path}/{disk_path}{item['@href']}"
-                            self.bkinfo['nav_file'] = lstr
+                    if item.get('@properties') == 'nav':
+                        navf = Path(f"{path}/{disk_path}{item['@href']}")
+                        self.bkinfo['nav_file'] = navf
                 if self.bkinfo['nav_file'] == 'None':
                     self.wrlog(True,
                                ('Fatal error - did not find navigation file'))
                     self.rdict['fatal'] = True
                     return
                 else:
-                    if self.DEBUG:
-                        lstr = f"nav_file found: {self.bkinfo['nav_file']}"
-                        self.wrlog(False, lstr)
+                    lstr = f"nav_file found: {self.bkinfo['nav_file']}"
+                    self.wrlog(False, lstr)
                 # we have a nav file, verify there is no existing page_list
                 # element
                     if self.genplist:
-                        with open(self.bkinfo['nav_file'], 'r') as nav_r:
+                        with self.bkinfo['nav_file'].open('r') as nav_r:
                             nav_data = nav_r.read()
-                            lstr = '<nav epub:type="page-list"'
+                            lstr = 'epub:type="page-list"'
                             if nav_data.find(lstr) != -1:
+                                self.genplist = False
+                                self.bkinfo['has_plist'] = True
                                 self.wrlog(True,
                                            ('    ->INFO<- This epub file '
                                             'already has a page-list '
@@ -788,21 +857,18 @@ class epub_paginator:
                                            ('   ->INFO<- page-list navigation '
                                             'was selected but will not '
                                             'be created.'))
-                                self.genplist = False
                                 if self.match:
                                     self.bkinfo['match'] = True
                                     # count the total number of pages in the
                                     # nav pagelist
                                     pgs = self.get_nav_pagecount()
                                     self.bkinfo['pages'] = pgs
-                                    if self.rdict['fatal']:
-                                        self.wrlog(True, 'Fatal error.')
-                                        return(self.rdict)
                                 else:
                                     self.bkinfo['match'] = False
                             else:
                                 # there is no pagelist, unset match
                                 self.match = False
+                                self.bkinfo['has_plist'] = False
                                 self.bkinfo['match'] = False
 
         # we're good to go
@@ -838,8 +904,9 @@ class epub_paginator:
         # scan until we find '<body' and just copy all the header stuff.
         for chapter in self.bkinfo['spine_lst']:
             sct_pgcnt = 0
-            with open(f"{self.bkinfo['unzip_path']}/"
-                      f"{chapter['disk_file']}", 'r') as ebook_rfile:
+            efile = Path((f"{self.bkinfo['unzip_path']}/"
+                          f"{chapter['disk_file']}"))
+            with efile.open('r') as ebook_rfile:
                 ebook_data = ebook_rfile.read()
                 if self.DEBUG:
                     self.wrlog(False,
@@ -847,14 +914,23 @@ class epub_paginator:
                     self.wrlog(False, f'The page count is {book_curpg:,}')
             if self.bkinfo['match']:
                 lstr = 'epub:type="pagebreak"'
-                chapter['sct_pgcnt'] = ebook_data.count(lstr)
-                book_curpg += chapter['sct_pgcnt']
+                ep_typcnt = ebook_data.count(lstr)
+                # in case this is an aria file
+                lstr = 'role="doc-pagebreak"'
+                aria_typcnt = ebook_data.count(lstr)
+                if aria_typcnt:
+                    book_curpg += aria_typcnt
+                    chapter['sct_pgcnt'] = aria_typcnt
+                else:
+                    book_curpg += ep_typcnt
+                    chapter['sct_pgcnt'] = ep_typcnt
             # we always do this loop to count words.  But if we are matching
             # pages, do not change chapter nor book_curpg
             body1 = ebook_data.find('<body')
             if body1 == -1:
                 self.rdict['errors'].append(f"No <body> element found. "
                                             f"File: {chapter['disk_file']}")
+                self.rdict['fatal'] = True
                 return 0
             else:
                 idx = body1
@@ -869,11 +945,12 @@ class epub_paginator:
                 elif ebook_data[idx] == ' ':  # we found a word boundary
                     page_words += 1
                     book_wordcount += 1
-                    if page_words > self.pgwords:
-                        if not self.bkinfo['match']:
-                            sct_pgcnt += 1
-                            book_curpg += 1
-                        page_words = 0
+                    if self.pgwords and not self.bkinfo['match']:
+                        if page_words > self.pgwords:
+                            if not self.bkinfo['match']:
+                                sct_pgcnt += 1
+                                book_curpg += 1
+                            page_words = 0
                     while ebook_data[idx] == ' ':  # skip additional whitespace
                         idx += 1
                 else:  # just copy non-white space and non-element stuff
@@ -885,8 +962,31 @@ class epub_paginator:
             if not self.bkinfo['match']:
                 chapter['sct_pgcnt'] = sct_pgcnt
         self.bkinfo['words'] = book_wordcount
-        self.bkinfo['pages'] = book_curpg
+        if self.pgwords and not self.bkinfo['match']:
+            self.bkinfo['pages'] = book_curpg
         return
+
+    def get_html_elmnt(html_str):
+        """
+        Find the next html_element in the str.
+        Returns the html element and it's start location in the string.
+        """
+
+        rd = {
+                "loc": 0,
+                "fstr": ''
+             }
+        rd['loc'] = html_str.find('<')
+        if rd['loc'] == -1:
+            return (rd)
+        else:
+            idx = 1
+            hlen = len(html_str)
+            while html_str[idx] != '>':
+                if idx < hlen:
+                    idx += 1
+                else:
+                    continue
 
     def scan_file(self, ebook_data, chapter):
         """
@@ -917,21 +1017,24 @@ class epub_paginator:
         sct_pg = 1
         ft_lst = []
         # scan until we find '<body' and just copy all the header stuff.
+        # we only scan for <body since calibre conversion makes the body
+        # element '<body class=calibre>
         body1 = ebook_data.find('<body')
         if body1 == -1:
             pgbook += ebook_data
 #             print('No <body> element found.')
             estr = f"No <body> element found. File: {chapter['disk_file']}"
             self.rdict['errors'].append(estr)
+            self.rdict['fatal'] = True
             return pgbook
         else:
             pgbook += ebook_data[:body1]
-            idx = body1
+            ebook_data = ebook_data[body1:]
         while idx < len(ebook_data)-1:
-            # we found an html element, just copy it and don't count words
+            # If we find an html element, just copy it and don't count
+            # words
             if ebook_data[idx] == '<':
-                # if the element is </div> or </p>, after we scan past it,
-                # insert any footers
+                # get_html_elmnt(ebook_data[idx])
                 html_element = ebook_data[idx]
                 idx += 1
                 while ebook_data[idx] != '>':
@@ -939,26 +1042,45 @@ class epub_paginator:
                     idx += 1
                 html_element += ebook_data[idx]
                 idx += 1
-                # if span element with pagebreak and a converted book, then
-                # don't put in the book, remove it.
-                # TODO
-                # Fix to allow keeping these and matching, while creating a
-                # page-list in the nav file.
+                # if span element with pagebreak and a converted book,
+                # then don't put in the book, remove it.
+                # TODO Fix this to allow keeping these and matching,
+                # while creating a page-list in the nav file.
                 rm_pbreak = (self.bkinfo['converted'] and
                              html_element.find('span') != -1 and
                              html_element.find('pagebreak') != -1)
                 if rm_pbreak:
-                    self.wrlog(True, f'Removing html element: {html_element}')
-                    # but we must also remove the </span>
-                    if ebook_data[idx] == '<':
-                        html_element = ebook_data[idx]
-                        while ebook_data[idx] != '>':
+                    # but we must be sure we remove the closing span.
+                    # This is either /> or </span>
+                    # a </span>
+                    if html_element.find('/>') == -1:
+                        # we must look for </span> and extend removal
+                        svidx = idx
+                        if ebook_data[idx] == '<':
+                            html_element = ebook_data[idx]
+                            while ebook_data[idx] != '>':
+                                idx += 1
+                                html_element += ebook_data[idx]
                             idx += 1
-                            html_element += ebook_data[idx]
-                        self.wrlog(True,
-                                   f'Removing html element: {html_element}')
-                        idx += 1
-                pgbook += html_element
+                            if html_element.find('</span>') != -1:
+                                htstr = (f"file {chapter['disk_file']}: "
+                                         f'Removing html element: '
+                                         f'{html_element}')
+                                self.rdict['errors'].append(htstr)
+                                self.wrlog(True, htstr)
+                            else:
+                                idx = svidx
+                    else:
+                        htstr = (f"file {chapter['disk_file']}: "
+                                    f'Removing html element: '
+                                    f'{html_element}')
+                        self.rdict['errors'].append(htstr)
+                        self.wrlog(True, htstr)
+                        # pgbook += html_element
+                else:
+                    pgbook += html_element
+                # if the element is </div> or </p>, after we scan past
+                # it, insert any footers
                 if html_element == '</div>' or html_element == '</p>':
                     if self.footer:
                         if ft_lst:
@@ -976,13 +1098,13 @@ class epub_paginator:
                                                  chapter['sct_pgcnt'])
                     # insert the page-link entry
                     if self.genplist:
-                        pstr = (f'<span epub:type="pagebreak" '
+                        pstr = (f'<span {epubns} epub:type="pagebreak" '
                                 f'id="page{self.curpg}" '
                                 f' role="doc-pagebreak" '
                                 f'title="{self.curpg}"/>'
                                 )
                         pgbook += pstr
-                        self.add_genplist_target(
+                        self.add_plist_target(
                                 self.curpg,
                                 chapter['href']
                             )
@@ -1031,25 +1153,58 @@ class epub_paginator:
         not_done = True
         while not_done:
             plink_loc = ebook_data.find('epub:type="pagebreak"')
-            if plink_loc == -1:
+            # some aria type files don't have epub:type="pagebreak"
+            plink_loc1 = ebook_data.find('role="doc-pagebreak"')
+            if plink_loc == -1 and plink_loc1 == -1:
                 pgbook += ebook_data
                 not_done = False
             else:
-                pgbook += ebook_data[:plink_loc]
-                # update the string
-                ebook_data = ebook_data[plink_loc:]
-                # find the curpgber
-                loc = ebook_data.find('title=')
-                if loc == -1:
-                    self.wrlog(True, 'Did not find title for page link')
+                if plink_loc == -1:
+                    plink_loc = plink_loc1
+                # find the start of the <span because sometimes
+                # aria-label is before the epub:type
+                spanst = ebook_data[:plink_loc].rfind('<span')
+                pgbook += ebook_data[:spanst]
+                ebook_data = ebook_data[spanst:]
+                # Find the page number. Could be title or aria-label
+                loctitle = ebook_data.find('title=')
+                loclabel = ebook_data.find('aria-label=')
+                if loctitle == -1 and loclabel == -1:
+                    estr = (f"{chapter['disk_file']}: "
+                            f"Did not find title or aria-label for page link")
+                    self.wrlog(False, estr)
+                    self.rdict['errors'].append(estr)
+                    self.rdict['error'] = True
+                    pgbook += ebook_data
+                    not_done = False
                 else:
+                    if loctitle != -1:
+                        loc = loctitle
+                        loc += len('title=')
+                    if loclabel != -1:
+                        loc = loclabel
+                        loc += len('aria-title')
                     pgbook += ebook_data[:loc]
                     ebook_data = ebook_data[loc:]
                     qlist = ebook_data.split('"')
                     thispage = qlist[1]
-                    # now find the end of this element </span>
-                    loc = ebook_data.find('</span>')
-                    loc += 7
+                    # now find the end of this element '/'
+                    loc = ebook_data.find('/')
+                    loc += 1
+                    if ebook_data[loc] == '>':
+                        # if next char is a >, found it
+                        loc += 1
+                    else:
+                        # otherwise must find 'span>'
+                        if ebook_data.find('span>') == -1:
+                            estr = (f"{chapter['disk_file']}: "
+                                    f"In match mode did not find "
+                                    f"closing span for pagebreak")
+                            self.wrlog(False, estr)
+                            self.rdict['errors'].append(estr)
+                            self.rdict['error'] = True
+                        else:
+                            loc += len('span>')
                     pgbook += ebook_data[:loc]
                     ebook_data = ebook_data[loc:]
                     # insert superscript here
@@ -1062,6 +1217,7 @@ class epub_paginator:
                     # Could miss a page if a paragraph contains two page links
                     loc = ebook_data.find('</p>')
                     if loc == -1:
+                        self.rdict['warn'] = True
                         lstr = ('Did not find paragraph end to '
                                 'insert matched footer.')
                         self.wrlog(True, lstr)
@@ -1125,29 +1281,70 @@ class epub_paginator:
         self.pg_wcnt = 0
         self.plist = ''
         self.bk_flist = []
-        self.get_bkinfo(source_epub)
+        self.epub_file = source_epub
+        self.rdict["logfile"]: ""
+        self.rdict["bk_outfile"] = ""
+        self.rdict["errors"] = []
+        self.rdict["fatal"] = False
+        self.rdict["messages"] = ""
+        self.rdict["logfile"] = ''
+        self.rdict["echk_fatal"] = False
+        self.rdict["echk_error"] = False
+        self.rdict["echk_warn"] = False
+        self.get_bkinfo()
         if self.rdict['fatal']:
             self.wrlog(True, 'Fatal error.')
             return(self.rdict)
-        self.ePubUnZip(source_epub, self.bkinfo['unzip_path'])
+        self.ePubUnZip(self.epub_file, self.bkinfo['unzip_path'])
         # figure out where everything is and the order they are in.
         self.scan_spine(self.bkinfo['unzip_path'])
         if self.rdict['fatal']:
             self.wrlog(True, 'Fatal error.')
             return(self.rdict)
-        # now check we have what we need for paging
-        if not self.bkinfo['match']:
-            if self.pgwords == 0 and self.pages == 0:
-                self.wrlog(True, 'Fatal error:')
-                self.wrlog(True, f"match: {self.bkinfo['match']}")
-                self.wrlog(True, f"pgwords: {self.pgwords}")
-                self.wrlog(True, f"pages: {self.pages}")
-                self.wrlog(True, f"cannot determine how to paginate.")
-                rdict['fatal'] = True
-                return(self.rdict)
         # scan the book to count words, section pages and total pages based on
         # words/page
         self.scan_sections()
+
+        # now check we have what we need for paging
+        # 1. if match and has plist, then match pagination
+        # 2. if not match and pgwords and pages = 0, then error
+        # 3. if pgwords != 0 then use pgwords
+        # 4. if pages != 0, then pgwords = bkinfo['words'] / pages
+        '''
+        bkinfo['match'] == if self.match and bkinfo['has_plist']
+        self.pgwords user setting
+        self.pages user setting
+        self.genplist user setting
+
+        '''
+        # report what we are doing
+        if self.genplist:
+            inline = self.footer or self.superscript
+            if self.bkinfo['has_plist'] and self.bkinfo['match'] and inline:
+                self.wrlog(True,f'Matching existing pagination.')
+            elif not self.bkinfo['has_plist']:
+                if self.pgwords == 0 and self.pages == 0:
+                    self.wrlog(True, 'Fatal error:')
+                    self.wrlog(True, f"match: {self.bkinfo['match']}")
+                    self.wrlog(True, f"pgwords: {self.pgwords}")
+                    self.wrlog(True, f"pages: {self.pages}")
+                    self.wrlog(True, f"cannot determine how to paginate.")
+                    self.rdict['fatal'] = True
+                    return(self.rdict)
+                elif self.pgwords:
+                    self.wrlog(True,(f'Generating pagelist with '
+                                    f'{self.pgwords} words per page.'))
+                else:
+                    self.pgwords = int(self.pages / self.bkinfo['words'])
+                    self.wrlog(True,(f'Generating pagelist with '
+                                     f'{self.pgwords} words per page.'))
+        else:
+            if self.footer:
+                self.wrlog(True,(f'Generating page footer with '
+                                 f'{self.pgwords} words per page.'))
+            if self.superscript:
+                self.wrlog(True,(f'Generating page superscripts with '
+                                 f'{self.pgwords} words per page.'))
         # this is the working loop. Scan each file, locate pages and insert
         # page-links and/or footers or superscripts
         self.curpg = 1
@@ -1158,13 +1355,13 @@ class epub_paginator:
                 lstr = (f"file: {self.bkinfo['unzip_path']}/"
                         f"{chapter['disk_file']}")
                 self.wrlog(False, lstr)
-            erfile = (f"{self.bkinfo['unzip_path']}/"
-                      f"{chapter['disk_file']}")
-            with open(erfile, 'r') as ebook_rfile:
+            erfile = Path((f"{self.bkinfo['unzip_path']}/"
+                           f"{chapter['disk_file']}"))
+            with erfile.open('r') as ebook_rfile:
                 ebook_data = ebook_rfile.read()
-            ewfile = (f"{self.bkinfo['unzip_path']}/"
-                      f"{chapter['disk_file']}")
-            with open(ewfile, 'w') as ebook_wfile:
+            ewfile = Path((f"{self.bkinfo['unzip_path']}/"
+                           f"{chapter['disk_file']}"))
+            with ewfile.open('w') as ebook_wfile:
                 start_total = self.tot_wcnt
                 if self.DEBUG:
                     lstr = (f"Scanning {chapter['disk_file']}; "
@@ -1190,13 +1387,13 @@ class epub_paginator:
         if self.bkinfo['match']:
             w_per_page = self.bkinfo['words']/self.bkinfo['pages']
             lstr = (f"    {self.bkinfo['words']:,} words; "
-                    f"{self.bkinfo['pages']:,} pages; "
-                    f"{int(w_per_page)} words per page")
+                    f"    {self.bkinfo['pages']:,} pages; "
+                    f"    {int(w_per_page)} words per page")
             self.wrlog(True, lstr)
         else:
             self.wrlog(True,
-                       (f"    {self.tot_wcnt:,} words;"
-                        f"{self.curpg:,} pages"))
+                       (f"    {self.bkinfo['words']:,} words;"
+                        f"    {self.bkinfo['pages']:,} pages"))
         # modify the nav_file to add the pagelist
         if self.genplist:
             self.plist += '  </ol></nav>' + CR
@@ -1218,6 +1415,7 @@ class epub_paginator:
                          stderr=PIPE,
                          universal_newlines=True)
         t2 = time.perf_counter()
+        self.wrlog(True, f"{self.bkinfo['title']}.epub")
         self.wrlog(True, f"    Paginated in {t2-t1:.2f} seconds.")
         t1 = time.perf_counter()
         if self.epubcheck != 'none':
@@ -1231,6 +1429,22 @@ class epub_paginator:
                          stderr=PIPE,
                          universal_newlines=True)
             # check and log the errors from epubcheck
+            for line in result.stdout.splitlines():
+                # Messages: 0 fatals / 0 errors / 0 warnings
+                # 0         1 2      3 4
+                if line.find('Messages:') != -1:
+                    w = line.split(' ')
+                    if w[1] != '0':
+                        self.wrlog(True,
+                                   f'Fatal error reported in epubcheck')
+                        self.rdict['fatal'] = True
+                        self.rdict['echk_fatal'] = True
+                    if w[4] != '0':
+                        self.wrlog(True, f'Errors reported in epubcheck')
+                        self.rdict['echk_error'] = True
+                    if w[7] != '0':
+                        self.wrlog(True, f'Warnings reported in epubcheck')
+                        self.rdict['echk_warn'] = True
             stdout_lines = result.stdout.splitlines()
             self.wrlog(True, result.stdout)
             if len(result.stderr) > 0:
