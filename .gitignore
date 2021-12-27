@@ -5,4 +5,5 @@ __pycache__/*
 *.epub
 newdev/*
 test_paged_epubs/*
+archive/*
 *.orig
