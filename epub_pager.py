@@ -40,6 +40,8 @@ class epub_paginator:
     1. If a file in the spine contains 'toc' or 'contents', skip
     counting words and inserting pagebreaks. This avoids lots of
     epubcheck errors, even though those errors are benign.
+    1. Added chk_xmlns to fix namespace errors when we are adding a
+    page-list
 
     **Version 2.96**
     1. fixed a bug with calculating words per page when not matching and
@@ -1197,11 +1199,29 @@ class epub_paginator:
             if ebook_data[idx] == '<':
                 html_element = ebook_data[idx]
                 idx += 1
-                while ebook_data[idx] != '>':
+                # note this doesn't work for comments! We must search
+                # for '-->'
+                # check for comment (this caused an error in Cordwainer
+                # Smith's The Rediscovery of Man.
+                if ebook_data[idx]=='!':
+                    # self.wrlog(True, f"Found a comment when scanning.")
+                    loc = ebook_data.find('-->')
+                    if loc == -1:
+                        estr = f"Comment end not found."
+                        self.wrlog(True, estr)
+                        self.rdict['errors'].append(estr)
+                    else:
+                        end = idx + loc + 3
+                        html_element += ebook_data[idx:end]
+                        self.wrlog(True, f"html_element: {html_element}")
+                        # pgbook += ebook_data[idx:idx + loc]
+                        idx += loc + 3
+                else:
+                    while ebook_data[idx] != '>':
+                        html_element += ebook_data[idx]
+                        idx += 1
                     html_element += ebook_data[idx]
                     idx += 1
-                html_element += ebook_data[idx]
-                idx += 1
                 # if we found </body>, we're done with this file.
                 if html_element == '</body>':
                     pgbook += html_element
