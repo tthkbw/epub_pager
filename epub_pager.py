@@ -22,6 +22,11 @@ class epub_paginator:
 
     **Release Notes**
 
+    **Version 2.98**
+    1. Begin implmentation of new scanning algorithm. This algorithm
+    improves the scan by more than 5x. Same changes to scan_file,
+    count_words and scan_sections.
+
     **Version 2.97**
     1. Added chk_orig property to allow epubcheck to be run on original
     file. Provide stats on errors for both original and paged epub file
@@ -1000,6 +1005,52 @@ class epub_paginator:
         self.bkinfo['spine_lst'] = spine_lst
         return()
 
+    def process_html(self, ebdata):
+        """
+        ebdata[0] == '<'. Grab, identify, and handle the html element.
+
+
+        Returns:
+
+        d = {
+            'done': Boolean -- we found </body>, we are done
+            'idx':  Int     -- location to begin the next scan
+            'el':   string  -- the html_element found
+        }
+        """
+
+        stat = {}
+        stat['done'] = False
+        stat['idx'] = 0
+        stat['el'] = ''
+        endel = [' ', '>']
+        loc = ebdata.find('>')
+        stat['idx'] = loc + 1
+        stat['el'] = ebdata[:loc + 1]
+        # self.wrlog(True, f"html element: {stat['el']}")
+        eltype = ''
+        idx = 1
+        while stat['el'][idx] not in endel:
+            eltype += stat['el'][idx]
+            idx += 1
+        if eltype[0] == '<':
+            eltype = eltype[1:]
+        # self.wrlog(True, f"eltype: {eltype}")
+        if eltype =='/body':
+            stat['done'] = True
+        elif eltype == '!--': #skip comments
+            self.wrlog(True, 'skipping comments')
+            loc = ebdata.find('-->')
+            stat['el'] += ebdata[:loc + 3]
+            stat['idx'] = loc + 3
+        elif eltype == 'nav':
+            self.wrlog(True, 'skipping nav')
+            loc = ebdata.find('/nav')
+            stat['el'] += ebdata[:loc + 5]
+            # self.wrlog(True, f"html element: {stat['el']}")
+            stat['idx'] = loc + 5
+        return(stat)
+
     def count_words(self):
         """
         Scan book contents and count words
@@ -1008,7 +1059,7 @@ class epub_paginator:
         changes are made
         """
 
-        book_wordcount = 0
+        wdcnt = 0
         idx = 0
         for chapter in self.bkinfo['spine_lst']:
             efile = Path((f"{self.bkinfo['unzip_path']}/"
@@ -1028,22 +1079,27 @@ class epub_paginator:
                 self.rdict['fatal'] = True
                 return 0
             else:
-                idx = body1
-            while idx < len(ebook_data)-1:
-                if ebook_data[idx] == '<':
-                    # we found an html element, just scan past it and don't
-                    # count words
-                    idx += 1
-                    while ebook_data[idx] != '>':
-                        idx += 1
-                    idx += 1
-                elif ebook_data[idx] == ' ':  # we found a word boundary
-                    book_wordcount += 1
-                    while ebook_data[idx] == ' ':  # skip additional whitespace
-                        idx += 1
-                else:  # just copy non-white space and non-element stuff
-                    idx += 1
-        self.bkinfo['words'] = book_wordcount
+                ebook_data = ebook_data[body1:]
+                stat = self.process_html(ebook_data)
+                ebook_data = ebook_data[stat['idx']:]
+            done = False
+            while not done:
+                lidx = 0
+                while ebook_data[lidx] in ['\n', ' ', '\t']:
+                    lidx += 1
+                ebook_data = ebook_data[lidx:]
+                # self.wrlog(True, f"5 process {ebook_data[:80]}")
+                if ebook_data[0] == '<':
+                    stat = self.process_html(ebook_data)
+                    if stat['done']:
+                        done = True
+                    else:
+                        ebook_data = ebook_data[stat['idx']:]
+                else:
+                    loc = ebook_data.find('<')
+                    wdcnt += len(ebook_data[:loc].split())
+                    ebook_data = ebook_data[loc:]
+        self.bkinfo['words'] = wdcnt
         if self.bkinfo['has_plist'] and self.bkinfo['match']:
             wc = int(self.bkinfo['words'] / self.bkinfo['pages'])
             self.bkinfo['pgwords'] = wc
@@ -1059,6 +1115,8 @@ class epub_paginator:
         **Keyword arguments:**
         ebook_data - complete data from an xhtml file.
         """
+        with open('./xx.xhtml','w') as xfile:
+            xfile.write(ebook_data)
         dct = xmltodict.parse(ebook_data)
         # print(f"xmlns: {dct['html']['@xmlns']}")
         d = dct['html']
@@ -1091,12 +1149,13 @@ class epub_paginator:
 
         page_words = 0
         book_curpg = 1
-        idx = 0
         # scan until we find '<body' and just copy all the header stuff.
         for chapter in self.bkinfo['spine_lst']:
             sct_pgcnt = 0
             efile = Path((f"{self.bkinfo['unzip_path']}/"
                           f"{chapter['disk_file']}"))
+            self.wrlog(True, (f"Section scan: "
+                              f"{chapter['disk_file']}"))
             with efile.open('r') as ebook_rfile:
                 ebook_data = ebook_rfile.read()
             if self.bkinfo['match']:
@@ -1120,30 +1179,51 @@ class epub_paginator:
                 self.rdict['fatal'] = True
                 return 0
             else:
-                idx = body1
-            while idx < len(ebook_data)-1:
-                if ebook_data[idx] == '<':
-                    # we found an html element, just scan past it and don't
-                    # count words
-                    idx += 1
-                    while ebook_data[idx] != '>':
-                        idx += 1
-                    idx += 1
-                elif ebook_data[idx] == ' ':  # we found a word boundary
-                    page_words += 1
+                ebook_data = ebook_data[body1:]
+                stat = self.process_html(ebook_data)
+                ebook_data = ebook_data[stat['idx']:]
+            done = False
+            while not done:
+                # self.wrlog(True, f"1 process {ebook_data[:80]}")
+                # copy returns and tabs and spaces
+                lidx = 0
+                while ebook_data[lidx] in ['\n', ' ', '\t']:
+                    lidx += 1
+                ebook_data = ebook_data[lidx:]
+                # self.wrlog(True, f"1+ process {ebook_data[:80]}")
+                stat = self.process_html(ebook_data)
+                if stat['done']:
+                    # self.wrlog(True,f"writing last: {ebook_data[stat['idx']:]}")
+                    done = True
+                else:
+                    ebook_data = ebook_data[stat['idx']:]
+                # if len(ebook_data) == 0:
+                    # self.wrlog(True, (f"File: {chapter['disk_file']} is"
+                #                       f"finished, but no /body found?"))
+                if ebook_data[0] == '<':
+                    continue
+#                     # self.wrlog(True, f"2 process '<' {ebook_data[:80]}")
+#                     stat = self.process_html(ebook_data)
+#                     if stat['done']:
+#                         done = True
+#                     else:
+#                         self.wrlog(True, f"3 process {ebook_data[:80]}")
+#                         ebook_data = ebook_data[stat['idx']:]
+#                         self.wrlog(True, f"4 process {ebook_data[:80]}")
+                else:
+                    loc = ebook_data.find('<')
+                    page_words += len(ebook_data[:loc].split())
+                    # self.wrlog(True, f"loc: {loc}; {ebook_data[:80]}")
+                    ebook_data = ebook_data[loc:]
+                    # self.wrlog(True, f"loc: {loc}; {ebook_data[:80]}")
                     if self.bkinfo['pgwords'] and not self.bkinfo['match']:
                         if page_words > self.bkinfo['pgwords']:
                             if not self.bkinfo['match']:
                                 sct_pgcnt += 1
                                 book_curpg += 1
-                            page_words = 0
-                    while ebook_data[idx] == ' ':  # skip additional whitespace
-                        idx += 1
-                else:  # just copy non-white space and non-element stuff
-                    idx += 1
-            if self.DEBUG:
-                lstr = f'Section page count is: {sct_pgcnt}'
-                self.wrlog(False, lstr)
+                            page_words = page_words - self.pgwords
+            lstr = f'Section page count is: {sct_pgcnt}'
+            self.wrlog(False, lstr)
             # store the section pagecount in the dictionary.
             if not self.bkinfo['match']:
                 chapter['sct_pgcnt'] = sct_pgcnt
@@ -1185,7 +1265,6 @@ class epub_paginator:
         body1 = ebook_data.find('<body')
         if body1 == -1:
             pgbook += ebook_data
-#             print('No <body> element found.')
             estr = f"Fatal error: No <body> found in {chapter['disk_file']}"
             self.rdict['errors'].append(estr)
             self.rdict['fatal'] = True
@@ -1193,90 +1272,34 @@ class epub_paginator:
         else:
             pgbook += ebook_data[:body1]
             ebook_data = ebook_data[body1:]
-        while idx < len(ebook_data)-1:
+        done = False
+        while not done:
             # If we find an html element, just copy it and don't count
             # words
-            if ebook_data[idx] == '<':
-                html_element = ebook_data[idx]
-                idx += 1
-                # note this doesn't work for comments! We must search
-                # for '-->'
-                # check for comment (this caused an error in Cordwainer
-                # Smith's The Rediscovery of Man.
-                if ebook_data[idx]=='!':
-                    # self.wrlog(True, f"Found a comment when scanning.")
-                    loc = ebook_data.find('-->')
-                    if loc == -1:
-                        estr = f"Comment end not found."
-                        self.wrlog(True, estr)
-                        self.rdict['errors'].append(estr)
-                    else:
-                        end = idx + loc + 3
-                        html_element += ebook_data[idx:end]
-                        self.wrlog(True, f"html_element: {html_element}")
-                        # pgbook += ebook_data[idx:idx + loc]
-                        idx += loc + 3
-                else:
-                    while ebook_data[idx] != '>':
-                        html_element += ebook_data[idx]
-                        idx += 1
-                    html_element += ebook_data[idx]
-                    idx += 1
-                # if we found </body>, we're done with this file.
-                if html_element == '</body>':
-                    pgbook += html_element
+            if ebook_data[0] == '<':
+                stat = self.process_html(ebook_data[idx:])
+                if stat['done']:
+                    # self.wrlog(True,f"writing last: {ebook_data[stat['idx']:]}")
                     pgbook += ebook_data[idx:]
-                    break
-                # if span element with pagebreak and a converted book,
-                # then don't put in the book, remove it.
-                # TODO Fix this to allow keeping these and matching,
-                # while creating a page-list in the nav file.
-                rm_pbreak = (self.bkinfo['converted'] and
-                             html_element.find('span') != -1 and
-                             html_element.find('pagebreak') != -1)
-                if rm_pbreak:
-                    # but we must be sure we remove the closing span.
-                    # This is either /> or </span>
-                    # a </span>
-                    if html_element.find('/>') == -1:
-                        # we must look for </span> and extend removal
-                        svidx = idx
-                        if ebook_data[idx] == '<':
-                            html_element = ebook_data[idx]
-                            while ebook_data[idx] != '>':
-                                idx += 1
-                                html_element += ebook_data[idx]
-                            idx += 1
-                            if html_element.find('</span>') != -1:
-                                htstr = (f"file {chapter['disk_file']}: "
-                                         f'Removing <span>..</span>')
-                                self.wrlog(True, htstr)
-                            else:
-                                idx = svidx
-                    else:
-                        htstr = (f"file {chapter['disk_file']}: "
-                                 f'Removing html element: {html_element}')
-                        self.wrlog(True, htstr)
-                        # pgbook += html_element
+                    done = True
                 else:
-                    pgbook += html_element
-                # if the element is </div> or </p>, after we scan past
-                # it, insert any footers
-                if html_element == '</div>' or html_element == '</p>':
-                    if self.footer:
-                        if ft_lst:
-                            for ft in ft_lst:
-                                pgbook += ft
+                    pgbook += ebook_data[:stat['idx']]
+                    ebook_data = ebook_data[stat['idx']:]
+                    insfoot = stat['el'] == '</p>' or stat['el'] == '</div>'
+                    if insfoot and ft_lst:
+                        for ft in ft_lst:
+                            pgbook += ft
                         ft_lst = []
-            elif ebook_data[idx] == ' ':  # we found a word boundary
-                self.pg_wcnt += 1
-                self.tot_wcnt += 1
+            else:
+                loc = ebook_data.find('<')
+                # at this point we could back up and place pagelinks
+                wdcnt = len(ebook_data[:loc].split())
+                pgbook += ebook_data[:loc]
+                # self.wrlog(True, f"Wordcount: {wdcnt}")
+                self.pg_wcnt += wdcnt
+                self.tot_wcnt += wdcnt
+                ebook_data = ebook_data[loc:]
                 if self.pg_wcnt > self.pgwords:
-                    # insert the superscripted page number
-                    if self.superscript:
-                        pgbook += self.new_super(self.curpg,
-                                                 sct_pg,
-                                                 chapter['sct_pgcnt'])
                     # insert the page-link entry
                     # note that we make a unique (we hope!) id for the
                     # pagelink
@@ -1291,20 +1314,33 @@ class epub_paginator:
                                 self.curpg,
                                 chapter['href']
                             )
+                    # insert the superscripted page number
+                    if self.superscript:
+                        pgbook += self.new_super(self.curpg,
+                                                 sct_pg,
+                                                 chapter['sct_pgcnt'])
                     if self.footer:
                         ft_lst.append(self.bld_foot(self.curpg,
                                                     sct_pg,
                                                     chapter['sct_pgcnt']))
+                    '''
+                    if self.footer:
+                        # for the footer, find the next </div> or </p> then
+                        # insert
+                        while (stat['el'] != '</p>' and
+                               stat['el'] != '</div>'):
+                            stat = self.process_html(ebook_data[idx:])
+                            self.wrlog(True, f"Found el: {stat['el']}")
+                            pgbook += ebook_data[:stat['idx']]
+                            ebook_data = ebook_data[stat['idx']:]
+                        pgbook += self.bld_foot(self.curpg,
+                                      sct_pg,
+                                      chapter['sct_pgcnt'])
+                    '''
                     sct_pg += 1
                     self.curpg += 1
-                    self.pg_wcnt = 0
-                # skip additional whitespace
-                while ebook_data[idx] == ' ':
-                    pgbook += ebook_data[idx]
-                    idx += 1
-            else:  # just copy non-white space and non-element stuff
-                pgbook += ebook_data[idx]
-                idx += 1
+                    self.pg_wcnt = self.pg_wcnt - self.pgwords
+                    # self.wrlog(True, f"page: pg_wcnt now {self.pg_wcnt}")
         return (pgbook)  # }}}
 
     def scan_match_file(self, ebook_data, chapter):
