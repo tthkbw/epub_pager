@@ -10,7 +10,6 @@ import zipfile
 
 CR = '\n'
 opf_dictkey = 'package'
-# epubns = 'xmlns:epub="http://www.idpf.org/2011/epub"'
 pglnk = 'pagetb'
 epubns = 'xmlns:epub="http://www.idpf.org/2007/ops"'
 
@@ -946,7 +945,7 @@ class epub_paginator:
                         navf = Path(f"{path}/{disk_path}{item['@href']}")
                         self.bkinfo['nav_item'] = item['@href']
                         self.bkinfo['nav_file'] = navf
-                if self.bkinfo['nav_file'] is 'None':
+                if self.bkinfo['nav_file'] == 'None':
                     self.wrlog(True,
                                ('Fatal error - did not find navigation file'))
                     self.rdict['fatal'] = True
@@ -1575,7 +1574,6 @@ class epub_paginator:
         self.wrlog(True, '\n')
         return
 
-
 # directory structures and names
 # self.outdir/
 #   book1/: unzipped source epub--modified in place
@@ -1590,7 +1588,9 @@ class epub_paginator:
 
 # Parameters:
 # source_epub: full path to source epub file--the file to paginate
+
     def paginate_epub(self, source_epub):
+
         """
         **paginate_epub**
 
