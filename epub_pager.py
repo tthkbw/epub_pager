@@ -22,10 +22,16 @@ class epub_paginator:
 
     **Release Notes**
 
+    **Version 2.99**
+    1. Implement placing pagebreaks and supers at exact word position
+    with new scanning algorithm.
+
     **Version 2.98**
     1. Begin implmentation of new scanning algorithm. This algorithm
     improves the scan by more than 5x. Same changes to scan_file,
     count_words and scan_sections.
+    1. This version generates 750 paged ebooks from the library with no
+    fatal errors.
 
     **Version 2.97**
     1. Added chk_orig property to allow epubcheck to be run on original
@@ -33,7 +39,7 @@ class epub_paginator:
     results from epubcheck.
     1. Added finding id="page-7" to searching for a page value in a
     pagebreak element. A lot of books don't have a 'title' or
-    'aria-label' specification, or a displayable page number. 
+    'aria-label' specification, or a displayable page number.
     1. Changed epubcheck to not report warnings to simplify testing.
     1. Made the page link id's more unique so we don't inadvertently get
     duplicate ids of form id='page7' for example. I use pagetb as the
@@ -41,7 +47,7 @@ class epub_paginator:
     1. Added a fix for figuring out the relative href for page links
     when opf_file and nav file are not at the same directory level.
     1. Fixed books that have file names or paths that contain spaces,
-    commas, etc, which result in invalid URI in pagelists. 
+    commas, etc, which result in invalid URI in pagelists.
     1. If a file in the spine contains 'toc' or 'contents', skip
     counting words and inserting pagebreaks. This avoids lots of
     epubcheck errors, even though those errors are benign.
@@ -176,7 +182,7 @@ class epub_paginator:
     1. Adds chapter page numbering.
     """
 
-    version = '2.97'
+    version = '2.99'
     bkinfo = {
         "version": "",
         "converted": False,
@@ -194,28 +200,28 @@ class epub_paginator:
         "pgwords": 0,
         "pages": 0
     }
-    curpg = 1        # current page number
-    tot_wcnt = 0     # count of total words in the book
-    pg_wcnt = 0      # word count per page
-    plist = ''       # the page-list element for the nav file
-    bk_flist = []    # list of all files in the epub
-    logpath = ''     # path for the logfile
-    epub_file = ''   # this will be the epub to paginate
+    curpg = 1  # current page number
+    tot_wcnt = 0  # count of total words in the book
+    pg_wcnt = 0  # word count per page
+    plist = ''  # the page-list element for the nav file
+    bk_flist = []  # list of all files in the epub
+    logpath = ''  # path for the logfile
+    epub_file = ''  # this will be the epub to paginate
 
-    rdict = {                  # data to return to calling program
-        "logfile": "",         # logfile location and name
-        "bk_outfile": "",      # modified epub file name and location
-        "errors": [],          # list of errors that occurred
-        "fatal": False,        # Was there a fatal error?
-        "error": False,        # epub_pager error
-        "warn": False,         # epub_pager warning
-        "orig`_fatal": 0,      # epubcheck fatal error original file
-        "orig`_error": 0,      # epubcheck error original file
-        "orig`_warn": 0,       # epubcheck warning original file
-        "echk_fatal": 0,       # epubcheck fatal error
-        "echk_error": 0,       # epubcheck error
-        "echk_warn": 0,        # epubcheck warning
-        "messages": ""         # list of messages generated.
+    rdict = {  # data to return to calling program
+        "logfile": "",  # logfile location and name
+        "bk_outfile": "",  # modified epub file name and location
+        "errors": [],  # list of errors that occurred
+        "fatal": False,  # Was there a fatal error?
+        "error": False,  # epub_pager error
+        "warn": False,  # epub_pager warning
+        "orig`_fatal": 0,  # epubcheck fatal error original file
+        "orig`_error": 0,  # epubcheck error original file
+        "orig`_warn": 0,  # epubcheck warning original file
+        "echk_fatal": 0,  # epubcheck fatal error
+        "echk_error": 0,  # epubcheck error
+        "echk_warn": 0,  # epubcheck warning
+        "messages": ""  # list of messages generated.
     }
 
     def __init__(self):
@@ -366,16 +372,14 @@ class epub_paginator:
                 myzip.write(srcfiles_path + '/' + 'mimetype', 'mimetype')
                 bk_flist.remove('mimetype')
             else:
-                self.wrlog(True,
-                           'Fatal error, no mimetype file was found.')
+                self.wrlog(True, 'Fatal error, no mimetype file was found.')
                 if self.DEBUG:
                     self.wrlog(False, 'bk_flist: ')
                     self.wrlog(False, bk_flist)
                 sys.exit('Fatal error, no mimetype file was found.')
         with zipfile.ZipFile(epub_path, 'a', zipfile.ZIP_DEFLATED) as myzip:
             for ifile in bk_flist:
-                myzip.write(f"{srcfiles_path}/{ifile}",
-                            ifile,
+                myzip.write(f"{srcfiles_path}/{ifile}", ifile,
                             zipfile.ZIP_DEFLATED)
 
     def ePubUnZip(self, fileName, unzip_path):
@@ -400,7 +404,7 @@ class epub_paginator:
         Return version of epub_pager.
         """
 
-        return(self.version)
+        return (self.version)
 
     def get_bkinfo(self):
         """
@@ -431,22 +435,23 @@ class epub_paginator:
         # The epub name is the book file name with spaces removed and '.epub'
         # removed.
         dirsplit = self.epub_file.split('/')
-        stem_name = dirsplit[len(dirsplit)-1].replace(' ', '')
+        stem_name = dirsplit[len(dirsplit) - 1].replace(' ', '')
         self.bkinfo['title'] = stem_name.replace('.epub', '')
-        self.logpath = Path(f"{self.outdir}/" f"{self.bkinfo['title']}.log")
+        self.logpath = Path(f"{self.outdir}/"
+                            f"{self.bkinfo['title']}.log")
         self.rdict['logfile'] = self.logpath
         bkout = f"{self.outdir}/{self.bkinfo['title']}.epub"
         self.rdict['bk_outfile'] = bkout
         with self.logpath.open('w') as logfile:
-            logfile.write(''+'\n')
+            logfile.write('' + '\n')
         if not Path(self.epub_file).is_file():
             self.wrlog(True, 'Source epub not found.')
             self.rdict['errors'].append("Fatal error: Source epub not found.")
             self.rdict['fatal'] = True
-            return(self.rdict)
+            return (self.rdict)
         self.wrlog(True, '---------------------------')
-        self.wrlog(True,  f"epub_paginator version {self.get_version()}")
-        self.wrlog(True,  f'Paginating {dirsplit[len(dirsplit)-1]}')
+        self.wrlog(True, f"epub_paginator version {self.get_version()}")
+        self.wrlog(True, f'Paginating {dirsplit[len(dirsplit)-1]}')
         # dump configuration
         self.wrlog(False, f'Configuration:')
         self.wrlog(False, f'  outdir: {self.outdir}')
@@ -482,16 +487,14 @@ class epub_paginator:
             if self.DEBUG:
                 self.wrlog(True, 'Handling epub 2')
             # if convert is set, then convert to epub3 first
-            if self.ebookconvert != None:
-                self.wrlog(True,
-                           (f'    Converting to epub3 using '
-                            f'{self.ebookconvert}'))
+            if self.ebookconvert is not None:
+                self.wrlog(True, (f'    Converting to epub3 using '
+                                  f'{self.ebookconvert}'))
                 epub3_file = self.epub_file.replace('.epub', '_epub3.epub')
-                ebkcnvrt_cmd = [self.ebookconvert,
-                                self.epub_file,
-                                epub3_file,
-                                '--epub-version',
-                                '3']
+                ebkcnvrt_cmd = [
+                    self.ebookconvert, self.epub_file, epub3_file,
+                    '--epub-version', '3'
+                ]
                 result = run(ebkcnvrt_cmd,
                              stdout=PIPE,
                              stderr=PIPE,
@@ -565,7 +568,7 @@ class epub_paginator:
                     'this is probably an ePub2 file.')
             self.wrlog(True, lstr)
             self.wrlog(True, 'Convert to ePub3 and try again.')
-            return('no_version')
+            return ('no_version')
         else:
             version = opf_dict['package']['@version']
         return (version)
@@ -616,7 +619,7 @@ class epub_paginator:
                 if int(nav_data[:loc2]) > max_page:
                     max_page = int(nav_data[:loc2])
         self.wrlog(True, f'Nav pagelist page count is: {max_page}')
-        return(max_page)
+        return (max_page)
 
     def wrlog(self, stdout, message):
         """
@@ -840,14 +843,14 @@ class epub_paginator:
         opf_list = self.bkinfo['opf_file'].split('/')
         nav_list = str(self.bkinfo['nav_item']).split('/')
         manifest_list = manifest_item['@href'].split('/')
-        manifest_fnm = manifest_list[len(manifest_list)-1]
+        manifest_fnm = manifest_list[len(manifest_list) - 1]
         if len(opf_list) == 1:
             opf_path = []
         else:
-            opf_path = opf_list[:len(opf_list)-1]
+            opf_path = opf_list[:len(opf_list) - 1]
         if self.DEBUG:
             lstr = f"opf_path: {opf_path}"
-            self.wrlog(True,lstr)
+            self.wrlog(True, lstr)
         if len(nav_list) == 1:
             # this means nav and opf are same level, so use manifest
             # paths
@@ -856,19 +859,19 @@ class epub_paginator:
                         f"use manifest href.")
                 self.wrlog(True, lstr)
             href = urllib.parse.quote(manifest_item['@href'])
-            return(href)
-        np = nav_list[:len(nav_list)-1]
+            return (href)
+        np = nav_list[:len(nav_list) - 1]
         nav_path = opf_path + np
         if self.DEBUG:
             lstr = f"nav_path: {nav_path}"
-            self.wrlog(True,lstr)
+            self.wrlog(True, lstr)
         if len(manifest_list) == 1:
             manifest_path = []
         else:
-            manifest_path = manifest_list[:len(manifest_list)-1]
+            manifest_path = manifest_list[:len(manifest_list) - 1]
         if self.DEBUG:
             lstr = f"manifest_path: {manifest_path}"
-            self.wrlog(True,lstr)
+            self.wrlog(True, lstr)
         nn = opf_path + manifest_path
         if self.DEBUG:
             lstr = f"opf_path+manifest_path: {nn}"
@@ -885,7 +888,7 @@ class epub_paginator:
                         f"{manifest_path}")
                 self.wrlog(True, lstr)
             href = urllib.parse.quote(manifest_item['@href'])
-        return(href)
+        return (href)
 
     def scan_spine(self, path):
         """
@@ -925,7 +928,7 @@ class epub_paginator:
             opf_path = opf_file.split('/')
             disk_path = ''
             if opf_path:
-                for index in range(0, len(opf_path)-1):
+                for index in range(0, len(opf_path) - 1):
                     disk_path += f"{opf_path[index]}/"
             else:
                 self.rdict['fatal'] = True
@@ -936,14 +939,14 @@ class epub_paginator:
         # read the opf file and find nav file
         with opf_filep.open('r') as opf_file:
             opf_dict = xmltodict.parse(opf_file.read())
-        # be sure we find a nav file
+            # be sure we find a nav file
             if self.genplist:
                 for item in opf_dict[opf_dictkey]['manifest']['item']:
                     if item.get('@properties') == 'nav':
                         navf = Path(f"{path}/{disk_path}{item['@href']}")
                         self.bkinfo['nav_item'] = item['@href']
                         self.bkinfo['nav_file'] = navf
-                if self.bkinfo['nav_file'] == 'None':
+                if self.bkinfo['nav_file'] is 'None':
                     self.wrlog(True,
                                ('Fatal error - did not find navigation file'))
                     self.rdict['fatal'] = True
@@ -951,8 +954,8 @@ class epub_paginator:
                 else:
                     lstr = f"nav_file found: {self.bkinfo['nav_file']}"
                     self.wrlog(False, lstr)
-                # we have a nav file, verify there is no existing page_list
-                # element
+                    # we have a nav file, verify there is no existing page_list
+                    # element
                     if self.genplist:
                         with self.bkinfo['nav_file'].open('r') as nav_r:
                             nav_data = nav_r.read()
@@ -988,22 +991,23 @@ class epub_paginator:
             if self.DEBUG:
                 lstr = f"spine_item idref: {spine_item['@idref']}"
                 self.wrlog(False, lstr)
-            for manifest_item in opf_dict[opf_dictkey]['manifest']['item']:
-                if spine_item['@idref'] == manifest_item['@id']:
-                    if ('toc' in manifest_item['@href'].casefold() or
-                        'contents' in manifest_item['@href'].casefold()):
+            for m_item in opf_dict[opf_dictkey]['manifest']['item']:
+                if spine_item['@idref'] == m_item['@id']:
+                    if ('toc' in m_item['@href'].casefold() or
+                            'contents' in m_item['@href'].casefold()):
                         self.wrlog(True, (f"Skipping file "
-                                            f"{manifest_item['@href']} "
-                                            f"because TOC."))
+                                          f"{m_item['@href']} "
+                                          f"because TOC."))
                     else:
                         fdict = {}
-                        fdict['disk_file'] = f"{disk_path}{manifest_item['@href']}"
+                        fdict[
+                            'disk_file'] = f"{disk_path}{m_item['@href']}"
                         # take care of books structured with opf file and
                         # nav file at different directory levels
-                        fdict['href'] = self.bld_href(manifest_item)
+                        fdict['href'] = self.bld_href(m_item)
                         spine_lst.append(fdict)
         self.bkinfo['spine_lst'] = spine_lst
-        return()
+        return ()
 
     def process_html(self, ebdata):
         """
@@ -1036,9 +1040,10 @@ class epub_paginator:
         if eltype[0] == '<':
             eltype = eltype[1:]
         # self.wrlog(True, f"eltype: {eltype}")
-        if eltype =='/body':
+        if eltype == '/body':
+            # self.wrlog(True, f"done: html element: {stat['el']}")
             stat['done'] = True
-        elif eltype == '!--': #skip comments
+        elif eltype == '!--':  # skip comments
             self.wrlog(True, 'skipping comments')
             loc = ebdata.find('-->')
             stat['el'] += ebdata[:loc + 3]
@@ -1049,7 +1054,7 @@ class epub_paginator:
             stat['el'] += ebdata[:loc + 5]
             # self.wrlog(True, f"html element: {stat['el']}")
             stat['idx'] = loc + 5
-        return(stat)
+        return (stat)
 
     def count_words(self):
         """
@@ -1115,14 +1120,14 @@ class epub_paginator:
         **Keyword arguments:**
         ebook_data - complete data from an xhtml file.
         """
-        with open('./xx.xhtml','w') as xfile:
+        with open('./xx.xhtml', 'w') as xfile:
             xfile.write(ebook_data)
         dct = xmltodict.parse(ebook_data)
         # print(f"xmlns: {dct['html']['@xmlns']}")
         d = dct['html']
         if d.get('@xmlns:epub', False):
             # self.wrlog(True, f"xmlns:epub namespace is found.")
-            return(ebook_data)
+            return (ebook_data)
         else:
             if self.DEBUG:
                 self.wrlog(True, f"Adding xmlns:epub namespace.")
@@ -1193,12 +1198,13 @@ class epub_paginator:
                 # self.wrlog(True, f"1+ process {ebook_data[:80]}")
                 stat = self.process_html(ebook_data)
                 if stat['done']:
-                    # self.wrlog(True,f"writing last: {ebook_data[stat['idx']:]}")
+                    # estr = f"writing last: {ebook_data[stat['idx']:]}"
+                    # self.wrlog(True, estr)
                     done = True
                 else:
                     ebook_data = ebook_data[stat['idx']:]
                 # if len(ebook_data) == 0:
-                    # self.wrlog(True, (f"File: {chapter['disk_file']} is"
+                # self.wrlog(True, (f"File: {chapter['disk_file']} is"
                 #                       f"finished, but no /body found?"))
                 if ebook_data[0] == '<':
                     continue
@@ -1279,8 +1285,10 @@ class epub_paginator:
             if ebook_data[0] == '<':
                 stat = self.process_html(ebook_data[idx:])
                 if stat['done']:
-                    # self.wrlog(True,f"writing last: {ebook_data[stat['idx']:]}")
-                    pgbook += ebook_data[idx:]
+                    # self.wrlog(True,(f"writing last: "
+                    #                 f"{ebook_data[stat['idx']:]}"))
+                    pgbook += ebook_data[:stat['idx']]
+                    pgbook += ebook_data[stat['idx']:]
                     done = True
                 else:
                     pgbook += ebook_data[:stat['idx']]
@@ -1291,56 +1299,79 @@ class epub_paginator:
                             pgbook += ft
                         ft_lst = []
             else:
+                # we are at the beginning of a text string, just past
+                # the <p>
                 loc = ebook_data.find('<')
-                # at this point we could back up and place pagelinks
                 wdcnt = len(ebook_data[:loc].split())
-                pgbook += ebook_data[:loc]
-                # self.wrlog(True, f"Wordcount: {wdcnt}")
                 self.pg_wcnt += wdcnt
-                self.tot_wcnt += wdcnt
-                ebook_data = ebook_data[loc:]
                 if self.pg_wcnt > self.pgwords:
-                    # insert the page-link entry
-                    # note that we make a unique (we hope!) id for the
-                    # pagelink
-                    if self.genplist:
-                        pstr = (f'<span epub:type="pagebreak" '
-                                f'id="{pglnk}{self.curpg}" '
-                                f' role="doc-pagebreak" '
-                                f'title="{self.curpg}"/>'
-                                )
-                        pgbook += pstr
-                        self.add_plist_target(
-                                self.curpg,
-                                chapter['href']
-                            )
-                    # insert the superscripted page number
-                    if self.superscript:
-                        pgbook += self.new_super(self.curpg,
-                                                 sct_pg,
-                                                 chapter['sct_pgcnt'])
+                    need = self.pg_wcnt - self.pgwords
+                    # self.wrlog(True, (f"Page boundary. pg_wcnt: "
+                    #                   f"{self.pg_wcnt}. need: {need}"))
+                    # build and stage a footer because we are at a page
+                    # boundary
                     if self.footer:
-                        ft_lst.append(self.bld_foot(self.curpg,
-                                                    sct_pg,
-                                                    chapter['sct_pgcnt']))
-                    '''
-                    if self.footer:
-                        # for the footer, find the next </div> or </p> then
-                        # insert
-                        while (stat['el'] != '</p>' and
-                               stat['el'] != '</div>'):
-                            stat = self.process_html(ebook_data[idx:])
-                            self.wrlog(True, f"Found el: {stat['el']}")
-                            pgbook += ebook_data[:stat['idx']]
-                            ebook_data = ebook_data[stat['idx']:]
-                        pgbook += self.bld_foot(self.curpg,
-                                      sct_pg,
-                                      chapter['sct_pgcnt'])
-                    '''
+                        ft_lst.append(
+                            self.bld_foot(self.curpg, sct_pg,
+                                          chapter['sct_pgcnt']))
+                    # need == -1 means page ends just before this
+                    # paragraph, put the pagelist entry here. Also,
+                    # place it here if need is less than 10--or about
+                    # one line.
+                    if need < 10:
+                        # self.wrlog(True, f"Placing plist beginning")
+                        if self.genplist:
+                            pstr = (f'<span epub:type="pagebreak" '
+                                    f'id="{pglnk}{self.curpg}" '
+                                    f' role="doc-pagebreak" '
+                                    f'title="{self.curpg}"/>')
+                            pgbook += pstr
+                            self.add_plist_target(self.curpg, chapter['href'])
+                        # and insert the superscripted page number
+                        if self.superscript:
+                            pgbook += self.new_super(self.curpg, sct_pg,
+                                                     chapter['sct_pgcnt'])
+                        pgbook += ebook_data[:loc]
+                        ebook_data = ebook_data[loc:]
+                    else:
+                        # now count words and put in pgbook until we get to
+                        # our position
+                        lidx = 0
+                        words = 0
+                        while lidx < loc:
+                            # self.wrlog(True, f"lidx: {lidx}.")
+                            if ebook_data[lidx] == ' ':
+                                words += 1
+                            if words == need:
+                                # estr = f"Insert plist. lidx: {lidx}"
+                                # self.wrlog(True, estr)
+                                if self.genplist:
+                                    pstr = (f'<span epub:type="pagebreak" '
+                                            f'id="{pglnk}{self.curpg}" '
+                                            f' role="doc-pagebreak" '
+                                            f'title="{self.curpg}"/>')
+                                    pgbook += pstr
+                                    self.add_plist_target(
+                                        self.curpg, chapter['href'])
+                                # and insert the superscripted page number
+                                if self.superscript:
+                                    pgbook += self.new_super(
+                                        self.curpg, sct_pg,
+                                        chapter['sct_pgcnt'])
+                                pgbook += ebook_data[lidx:loc]
+                                lidx = loc
+                            else:
+                                pgbook += ebook_data[lidx]
+                                lidx += 1
+                        ebook_data = ebook_data[loc:]
                     sct_pg += 1
                     self.curpg += 1
                     self.pg_wcnt = self.pg_wcnt - self.pgwords
-                    # self.wrlog(True, f"page: pg_wcnt now {self.pg_wcnt}")
+                else:
+                    pgbook += ebook_data[:loc]
+                    ebook_data = ebook_data[loc:]
+                # self.wrlog(True, f"Wordcount: {wdcnt}")
+        # self.wrlog(True, f"pgbook: {pgbook}")
         return (pgbook)  # }}}
 
     def scan_match_file(self, ebook_data, chapter):
@@ -1439,8 +1470,7 @@ class epub_paginator:
                     ebook_data = ebook_data[loc:]
                     # insert superscript here
                     if self.superscript:
-                        sstr = self.new_super(thispage,
-                                              sct_pg,
+                        sstr = self.new_super(thispage, sct_pg,
                                               chapter['sct_pgcnt'])
                         pgbook += sstr
                     # scan for next paragraph start or end and insert footer.
@@ -1459,8 +1489,7 @@ class epub_paginator:
                         pgbook += ebook_data[:loc]
                         ebook_data = ebook_data[loc:]
                         if self.footer:
-                            pgbook += self.bld_foot(thispage,
-                                                    sct_pg,
+                            pgbook += self.bld_foot(thispage, sct_pg,
                                                     chapter['sct_pgcnt'])
                     sct_pg += 1
         return (pgbook)  # }}}
@@ -1482,13 +1511,15 @@ class epub_paginator:
             epubcheck_cmd = [self.epubcheck, '-e', self.epub_file]
         else:
             self.wrlog(True, 'Running epubcheck on paged epub file:' + CR)
-            epubcheck_cmd = [self.epubcheck, '-e',
-                                (f"{self.outdir}/"
-                                f"{self.bkinfo['title']}.epub")]
+            epubcheck_cmd = [
+                self.epubcheck, '-e',
+                (f"{self.outdir}/"
+                 f"{self.bkinfo['title']}.epub")
+            ]
         result = run(epubcheck_cmd,
-                        stdout=PIPE,
-                        stderr=PIPE,
-                        universal_newlines=True)
+                     stdout=PIPE,
+                     stderr=PIPE,
+                     universal_newlines=True)
         # check and log the errors from epubcheck
         for line in result.stdout.splitlines():
             # Messages: 0 fatals / 0 errors / 0 warnings
@@ -1503,15 +1534,14 @@ class epub_paginator:
                     # self.rdict['orig_warn'] = int(w[7])
                     if self.rdict['orig_fatal']:
                         self.wrlog(True,
-                                    (f"--> {self.rdict['orig_fatal']} fatal "
+                                   (f"--> {self.rdict['orig_fatal']} fatal "
                                     f"errors reported in epubcheck."))
                     if self.rdict['orig_error']:
-                        self.wrlog(True,
-                                    (f"--> {self.rdict['orig_error']} "
-                                    f"errors reported in epubcheck."))
+                        self.wrlog(True, (f"--> {self.rdict['orig_error']} "
+                                          f"errors reported in epubcheck."))
                     if self.rdict['orig_warn']:
                         self.wrlog(True,
-                                    (f"--> {self.rdict['orig_warn']} warnings "
+                                   (f"--> {self.rdict['orig_warn']} warnings "
                                     f"reported in epubcheck."))
                 else:
                     self.rdict['echk_fatal'] = int(w[1])
@@ -1519,21 +1549,22 @@ class epub_paginator:
                     # self.rdict['echk_warn'] = int(w[7])
                     if self.rdict['echk_fatal']:
                         self.wrlog(True,
-                                    (f"--> {self.rdict['echk_fatal']} fatal "
+                                   (f"--> {self.rdict['echk_fatal']} fatal "
                                     f"errors reported in epubcheck."))
                     if self.rdict['echk_error']:
-                        self.wrlog(True,
-                                    (f"--> {self.rdict['echk_error']} "
-                                    f"errors reported in epubcheck."))
+                        self.wrlog(True, (f"--> {self.rdict['echk_error']} "
+                                          f"errors reported in epubcheck."))
                     # if self.rdict['echk_warn']:
-                    #     self.wrlog(True,
-                    #                 (f"--> {self.rdict['echk_warn']} warnings "
+                    #     estr = (f"--> {self.rdict['echk_warn']} warnings "
+                    #             f"reported in epubcheck.")
+                    #     self.wrlog(True, estr)
+                    #
                     #                 f"reported in epubcheck."))
         if original:
             self.wrlog(True, '-------Epubcheck Original Output------')
         else:
             self.wrlog(True, '-------Epubcheck Paged Output---------')
-        self.wrlog(True,'')
+        self.wrlog(True, '')
         stdout_lines = result.stdout.splitlines()
         self.wrlog(True, result.stdout)
         if len(result.stderr) > 0:
@@ -1543,6 +1574,7 @@ class epub_paginator:
         self.wrlog(True, '--End Epubcheck Output-----')
         self.wrlog(True, '\n')
         return
+
 
 # directory structures and names
 # self.outdir/
@@ -1607,7 +1639,7 @@ class epub_paginator:
         self.get_bkinfo()
         if self.rdict['fatal']:
             self.wrlog(True, 'Fatal error.')
-            return(self.rdict)
+            return (self.rdict)
         # run epubcheck on the file to be paged if requested
         if self.chk_orig:
             self.run_chk(True)
@@ -1616,7 +1648,7 @@ class epub_paginator:
         self.scan_spine(self.bkinfo['unzip_path'])
         if self.rdict['fatal']:
             self.wrlog(True, 'Fatal error.')
-            return(self.rdict)
+            return (self.rdict)
 
         # scan the book to count words, section pages and total pages based on
         # words/page
@@ -1640,7 +1672,7 @@ class epub_paginator:
                 self.wrlog(True, f"pages: {self.pages}")
                 self.wrlog(True, f"cannot determine how to paginate.")
                 self.rdict['fatal'] = True
-                return(self.rdict)
+                return (self.rdict)
             elif self.pgwords:
                 self.wrlog(True, (f'Generating pagelist with '
                                   f"{self.bkinfo['pgwords']} words per page."))
@@ -1688,15 +1720,14 @@ class epub_paginator:
                 xebook_data = self.chk_xmlns(new_ebook)
                 ebook_wfile.write(xebook_data)
         if self.bkinfo['match']:
-            w_per_page = self.bkinfo['words']/self.bkinfo['pages']
+            w_per_page = self.bkinfo['words'] / self.bkinfo['pages']
             lstr = (f"    {self.bkinfo['words']:,} words; "
                     f"    {self.bkinfo['pages']:,} pages; "
                     f"    {int(w_per_page)} words per page")
             self.wrlog(True, lstr)
         else:
-            self.wrlog(True,
-                       (f"    {self.bkinfo['words']:,} words;"
-                        f"    {self.bkinfo['pages']:,} pages"))
+            self.wrlog(True, (f"    {self.bkinfo['words']:,} words;"
+                              f"    {self.bkinfo['pages']:,} pages"))
         # modify the nav_file to add the pagelist
         if self.genplist:
             self.plist += '  </ol></nav>' + CR
@@ -1705,14 +1736,13 @@ class epub_paginator:
         self.ePubZip((f"{self.outdir}/"
                       f"{self.bkinfo['title']}.epub"),
                      (f"{self.outdir}/"
-                      f"{self.bkinfo['title']}"),
-                     self.bk_flist)
+                      f"{self.bkinfo['title']}"), self.bk_flist)
         # and if DEBUG is not set, we remove the unzipped epub directory
         if not self.DEBUG:
-            rm_cmd = ['rm',
-                      '-rf',
-                      (f"{self.outdir}/"
-                       f"{self.bkinfo['title']}")]
+            rm_cmd = [
+                'rm', '-rf', (f"{self.outdir}/"
+                              f"{self.bkinfo['title']}")
+            ]
             result = run(rm_cmd,
                          stdout=PIPE,
                          stderr=PIPE,
@@ -1720,6 +1750,6 @@ class epub_paginator:
         t2 = time.perf_counter()
         self.wrlog(True, f"{self.bkinfo['title']}.epub")
         self.wrlog(True, f"    Paginated in {t2-t1:.2f} seconds.")
-        if self.epubcheck != None:
+        if self.epubcheck is not None:
             self.run_chk(False)
-        return(self.rdict)
+        return (self.rdict)
