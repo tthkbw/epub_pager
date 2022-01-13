@@ -631,7 +631,7 @@ class epub_paginator:
             nav_data = nav_r.read()
         loc = nav_data.find('epub:type="page-list"')
         if loc == -1:
-            # this should never happen since we get here only apler the entry
+            # this should never happen since we get here only after the entry
             # was found
             sys.exit(
                 (

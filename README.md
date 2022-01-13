@@ -12,14 +12,17 @@ pagination information formatted as superscripts in the text.
 
 * For ePub3 files, epub\_paginator can generate a page-list table in the
   navigation document, and page links in the epub text.
-* epub\_paginator can generate page information lines in text of an ePub2
-  or ePub3 document. These are placed at the end of the paragraph where
-  the page break occurs and appear like separate paragraphs in the book.
+* epub\_paginator can generate "pagelines"--information lines in text of
+  an ePub2 or ePub3 document. These are placed at the end of the
+  paragraph where the page break occurs and appear like separate
+  paragraphs in the book.
 * epub\_paginator can generate superscripted page information lines in
-  text of an ePub2 or ePub3 document. These are placed at the word where
-  the page break occurs.
+  text of an ePub2 or ePub3 document. These superscripts are placed
+  after the word where the page break occurs.
 * If an ePub3 document has existing pagination, epub\_paginator can match
-  the existing pagination with pagelines or superscripts.
+  the existing pagination with pagelines or superscripts. this allows
+  epub readers that do not support epub3 pagination to still show the
+  pagination.
 * Font size, color and alignment (right, left, or center) are
   selectable for pagelines.
 * Font size and color are selectable for superscripts.
@@ -27,7 +30,7 @@ pagination information formatted as superscripts in the text.
   for both the book and the current chapter.
 * For ebooks without existing pagination, the page size may be defined
   by specifying words per page, or by specifying total pages for the
-  book in which case words per page is:
+  book in which case words per page is calculated:
 
 > (words per page) = (words in the book) / (total pages).
 
@@ -140,17 +143,17 @@ configuration file is in json format. An example configuration file
 }
 ```
 
-### Epub Reader Support
+## Epub Reader Support
 
 Most epub readers do not support epub3 page-lists. 
 
-#### Adobe Digital Editions
+### Adobe Digital Editions
 
 On macOS Adobe Digital Editions reads page-list information and creates
 a listing of page numbers as links. Click a link and jump to the page
 number. This is the only support provided. 
 
-#### Apple Books
+### Apple Books
 
 As far as I am aware, only Apple Books supports using the epub3
 page-list element in a useful manner. However, I am not familiar with
@@ -180,23 +183,25 @@ display some page numbers in the margin, although the pagination in the
 displayed Books footer is consistent. Books does properly
 search for page numbers in books paginated by epub\_paginator.
 
-#### Other epub Readers Without epub3 Pagination Support
+### Other epub Readers Without epub3 Pagination Support
 
 Since most epub readers do not support displaying epub3 page-list
 information, epub\_paginator provides two alternatives for custom
 pagination.
 
-##### Pagelines
+#### Pagelines
 
 The 'pagelines' option directs epub\_paginator to place formatted lines
 containing pagination information in the text. These pagelines are
 placed at the end of the paragraph in which the page break occurred.
 
-##### Superscripts
+#### Superscripts
 
 The 'superscript' option directs epub\_paginator to place page
 information in the text of the book as a superscript placed after the
 word where the page break occurs. 
+
+## Examples
 
 The following image is the Calibre ebook-viewer app display a page of a
 book paginated with epub\_paginator. The superscript page information is in
@@ -209,13 +214,21 @@ presented.
 Note that Calibre ebook-viewer does not display information from the
 page-list of this ebook.
 
-<img src="./FarmBoy_pl_super.png" alt="example" width="600" >
+<img src="./epub_paginator_super_pageline.png" alt="ebook-viewer" width="600" >
 
-![epub\_paginator example](epub_paginator_super_pageline.png)
+By contrast, Apple Books shows the page-list page numbers in its footer
+line (where a page that contains a pagebreak will show, as in this
+example, 2-3), and also shows the exact location of the page break with
+a number in the margin. 
 
-![epub\_paginator example](FarmBoy_pl_super.png)
+One can now see that the superscript inserted by epub\_paginator appears
+in the same line as the pagebreak, and the pageline inserted by
+epub\_paginator appears at the end of the paragraph in which the page
+break occurred. 
 
-### The Details
+<img src="./FarmBoy_pl_super.png" alt="Apple Books" width="600" >
+
+## The Details
 
 epub\_paginator creates a copy of the input epub file and operates on the
 copy. Although epub\_paginator should not corrupt, delete, or otherwise
@@ -224,7 +237,7 @@ requires epub files without DRM (Digital Rights Management) to operate.
 It outputs the modified file to the directory specified in 'outdir' with
 '\_paged' appended to the file name.
 
-#### Determining the Page Length
+### Determining the Page Length
 
 If epub\_paginator detects an existing page-list element in the
 navigation file of the epub (this can only occur when the epub file is
@@ -246,10 +259,6 @@ options 'pgwords' and 'pages' as follows:
 3. if 'pgwords' is zero and 'pages' is not zero, then 'pgwords' is set to the
    integer value of (the book wordcount) / (pages) and 'pgwords' is used to
    determine the page length for the paginated book.
-
-##### Examples
-
-
 
 ### epubcheck Usage
 
@@ -286,7 +295,3 @@ program, ebook-convert, which epub\_paginator can use to convert epub2 books to
 epub3 books to allow page-list generation. If the option "ebookconvert"
 contains the path to ebook-convert, epub2 books will be converted to
 epub3 and the epub3 book will be paginated.
-
-### Debugging
-
-
