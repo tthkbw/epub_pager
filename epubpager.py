@@ -13,6 +13,7 @@ opf_dictkey = "package"
 pglnk = "pagetb"
 epubns = 'xmlns:epub="http://www.idpf.org/2007/ops"'
 # "ebookconvert": "/Applications/calibre.app/Contents/MacOS/ebook-convert",
+# "epubcheck": "/opt/homebrew/bin/epubcheck",
 
 
 class epub_paginator:
@@ -44,6 +45,11 @@ class epub_paginator:
     1. Changed name of footer to pageline. Also, ft_ type variable names changed to 'pl'
     1. Fixed a bug where the superscript, if colored, wasn't colored nor
     a superscript. Left out a ';'
+    1. Added option chk_warn to enable/disable reporting warnings from epubcheck. Defaults to false, warnings are not reported.
+    1. Fixed problems with reporting epubcheck results.
+    1. Fixed naming of logfile--appended _paged so it matches epub file name.
+    1. File names were changed to remove '_'.
+    1. Timing information added to rdict for epubcheck, epubconvert, and pagination times.
 
     **Version 2.98**# {{{
     1. Begin implmentation of new scanning algorithm. This algorithm
@@ -224,25 +230,30 @@ class epub_paginator:
     pg_wcnt = 0  # word count per page
     plist = ""  # the page-list element for the nav file
     bk_flist = []  # list of all files in the epub
-    logpath = Path()# path for the logfile
+    logpath = Path()  # path for the logfile
     epub_file = ""  # this will be the epub to paginate
 
     rdict = {  # data to return to calling program
         "logfile": "",  # logfile location and name
         "bk_outfile": "",  # modified epub file name and location
+        "version": "no_version",
+        "converted": False,  # if True, converted from epub2
         "errors": [],  # list of errors that occurred
         "fatal": False,  # Was there a fatal error?
         "error": False,  # epub_pager error
         "warn": False,  # epub_pager warning
-        "orig`_fatal": 0,  # epubcheck fatal error original file
-        "orig`_error": 0,  # epubcheck error original file
-        "orig`_warn": 0,  # epubcheck warning original file
+        "orig_fatal": 0,  # epubcheck fatal error original file
+        "orig_error": 0,  # epubcheck error original file
+        "orig_warn": 0,  # epubcheck warning original file
         "echk_fatal": 0,  # epubcheck fatal error
         "echk_error": 0,  # epubcheck error
-        "echk_warn": 0,  # epubcheck warning
+        "chk_warn": 0,  # epubcheck warning
+        "convert_time": 0,  # time to convert from epub2 to epub3
+        "paginate_time": 0,  # time to paginate the epub
+        "epubchkpage_time": 0,  # time to run epubcheck on paged epub
+        "epubchkorig_time": 0,  # time to run epubcheck on original epub
         "messages": "",  # list of messages generated.
     }
-
 
     def __init__(self):
         """
@@ -341,6 +352,10 @@ class epub_paginator:
 
         Run epubcheck on the file before pagination
 
+        **_echk_warn**
+
+        Boolean. If true, report warnings when running epubcheck.
+
         **_DEBUG_**
 
         Boolean. If True, print status and debug information to logile
@@ -369,6 +384,7 @@ class epub_paginator:
         self.ebookconvert = "none"
         self.epubcheck = "none"
         self.chk_orig = False
+        self.chk_warn = False
         self.DEBUG = False
 
     # the following two routines are modified from those on GitHub:
@@ -459,10 +475,11 @@ class epub_paginator:
         dirsplit = self.epub_file.split("/")
         stem_name = dirsplit[len(dirsplit) - 1].replace(" ", "")
         self.bkinfo["title"] = stem_name.replace(".epub", "")
-        self.logpath = Path(f"{self.outdir}/{self.bkinfo['title']}.log")
+        self.logpath = Path(f"{self.outdir}/{self.bkinfo['title']}_paged.log")
         self.rdict["logfile"] = self.logpath
         bkout = f"{self.outdir}/{self.bkinfo['title']}_paged.epub"
         self.rdict["bk_outfile"] = bkout
+        self.bkinfo["unzip_path"] = f"{self.outdir}/{self.bkinfo['title']}"
         with self.logpath.open("w") as logfile:
             logfile.write("" + "\n")
         if not Path(self.epub_file).is_file():
@@ -498,17 +515,18 @@ class epub_paginator:
 
         # first get the epub_version
         self.bkinfo["version"] = self.get_epub_version(self.epub_file)
+        self.rdict["version"] = self.bkinfo["version"]
         if self.bkinfo["version"] == "no_version":
             estr = "Fatal error: Version was not found in the ePub file."
             self.rdict["errors"].append(estr)
             self.rdict["fatal"] = True
             return
-        vnum = float(self.bkinfo["version"])
-        if vnum < 3.0:
+        if self.bkinfo["version"][0] != "3":
             if self.DEBUG:
                 self.wrlog(True, "Handling epub 2")
             # if convert is set, then convert to epub3 first
             if self.ebookconvert.casefold() != "none":
+                cnvrt_t1 = time.perf_counter()
                 self.wrlog(
                     True,
                     (f"    Converting to epub3 using " f"{self.ebookconvert}"),
@@ -527,21 +545,28 @@ class epub_paginator:
                     stderr=PIPE,
                     universal_newlines=True,
                 )
+                cnvrt_t2 = time.perf_counter()
+                self.rdict["convert_time"] = cnvrt_t2 - cnvrt_t1
+                self.wrlog(
+                    True,
+                    f"    ebook-convert took {self.rdict['convert_time']:.2f} seconds.",
+                )
+                self.wrlog(True, "\n")
                 if result.returncode == 0:
+                    self.wrlog(False, "Conversion log:")
+                    self.wrlog(False, result.stdout)
+                    self.epub_file = epub3_file
                     # now try again on version
                     v = self.get_epub_version(self.epub_file)
                     self.bkinfo["version"] = v
                     if self.bkinfo["version"] == "no_version":
                         estr = (
-                            "Fatal error: Apler conversion, version was "
+                            "Fatal error: After conversion, version was "
                             "not found in the ePub file."
                         )
                         self.rdict["errors"].append(estr)
                         self.rdict["fatal"] = True
                         return
-                    self.wrlog(False, "Conversion log:")
-                    self.wrlog(False, result.stdout)
-                    self.epub_file = epub3_file
                     self.wrlog(
                         True, f"epub converted - now paginating new file."
                     )
@@ -553,6 +578,7 @@ class epub_paginator:
                     ) + CR
                     self.plist = plstr
                     self.bkinfo["converted"] = True
+                    self.rdict["converted"] = True
                 else:
                     lstr = "Conversion to epub3 failed. Conversion reported:"
                     self.wrlog(True, lstr)
@@ -574,15 +600,15 @@ class epub_paginator:
                 self.wrlog(False, lstr)
                 self.genplist = False
                 self.match = False
+                self.bkinfo["has_plist"] = False
         else:
             self.plist = (
                 f'<nav epub:type="page-list" '
                 f'id="page-list" hidden="hidden"><ol>'
                 "\n"
             )
-        self.bkinfo["unzip_path"] = f"{self.outdir}/{self.bkinfo['title']}"
 
-    def get_epub_version(self, epub_file):
+    def new_get_epub_version(self,epub_file):
         """
         Return ePub version of ePub file
 
@@ -599,16 +625,93 @@ class epub_paginator:
 
         zfile = zipfile.ZipFile(epub_file)
         # find the opf file, which contains the version information
+        contain_data = zfile.read("META-INF/container.xml")
+        contain_str = str(contain_data)
+        rloc = contain_str.find("<rootfiles>")
+        if rloc == - 1:
+            print(f"Did not find <rootfiles> in container.")
+            estr = ("ABORTING: did not find <rootfiles> in container")
+            self.rdict["errors"].append(estr)
+            self.wrlog(True, estr)
+            self.wrlog(True, "Convert to ePub3 and try again.")
+            return "no_version"
+        contain_str= contain_str[rloc+3:]
+        rloc = contain_str.find("<rootfile")
+        if rloc == - 1:
+            print(f"Did not find <rootfile in container.")
+            estr = ("ABORTING: did not find <rootfile in container")
+            self.rdict["errors"].append(estr)
+            self.wrlog(True, estr)
+            self.wrlog(True, "Convert to ePub3 and try again.")
+            return "no_version"
+        contain_str = contain_str[rloc+3:]
+        rloc = contain_str.find("full-path=")
+        if rloc == - 1:
+            print(f"Did not find full-path in container.")
+            estr = ("ABORTING: did not find full-path in container")
+            self.rdict["errors"].append(estr)
+            self.wrlog(True, estr)
+            self.wrlog(True, "Convert to ePub3 and try again.")
+            return "no_version"
+        contain_str = contain_str[rloc+3:]
+        opflist = contain_str.split('"')
+        opf_file = opflist[1]
+        print(f"The opf file is {opf_file}.")
+        opf = zfile.read(opf_file)
+        opf_str = str(opf)
+
+        # first find the <package element
+        ploc = opf_str.find("<package")
+        if ploc == -1:
+            print("new_get_epub_version: Did not find package string in opf file")
+            return("no version")
+        else:
+            # find the version= string
+            opf_str = opf_str[ploc:]
+            vloc = opf_str.find("version=")
+            if vloc == -1:
+                print("new_get_epub_version: Did not find version string in opf file")
+                return("no version")
+            else:
+                vlist = opf_str[vloc:vloc+15].split('"')
+                print(f"new_get_epub_version vlist: {vlist}")
+                eversion = vlist[1]
+                print(f"new_get_epub_version: The epub version is: {eversion}")
+                return(eversion)
+
+    def get_epub_version(self, epub_file):
+        """
+        Return ePub version of ePub file
+
+        If ePub does not store the version information in the standard
+        location, return 'no version'
+
+        **Instance Variables**
+
+        **_epub_file_**
+
+        ePub file to return version of
+
+        """
+        
+
+        zfile = zipfile.ZipFile(epub_file)
+        # find the opf file, which contains the version information
         x_dct: Dict = {}
         opf_dict: Dict = {}
-        x_dct = xmltodict.parse(zfile.read("META-INF/container.xml")) # type: ignore
+        x_dct = xmltodict.parse(zfile.read("META-INF/container.xml"))  # type: ignore
         opf_file = x_dct["container"]["rootfiles"]["rootfile"]["@full-path"]
-        opf_dict = xmltodict.parse(zfile.read(opf_file)) # type: ignore
+
+        print("running new_get_epub_version.")
+        self.new_get_epub_version(epub_file)
+
+        opf_dict = xmltodict.parse(zfile.read(opf_file))  # type: ignore
         if opf_dict.get("package", "badkey") == "badkey":
             lstr = (
-                "ABORTING: Error parsing opf file, "
-                "this is probably an ePub2 file."
+                "ABORTING: Error parsing opf file, no package key found."
+                " This is probably an ePub2 file."
             )
+            self.rdict["errors"].append(lstr)
             self.wrlog(True, lstr)
             self.wrlog(True, "Convert to ePub3 and try again.")
             return "no_version"
@@ -989,7 +1092,7 @@ class epub_paginator:
         with confile.open("r") as container_file:
             xd = {}
             xd = xmltodict.parse(container_file.read())
-            opf_file = xd["container"]["rootfiles"]["rootfile"]["@full-path"] # type: ignore
+            opf_file = xd["container"]["rootfiles"]["rootfile"]["@full-path"]  # type: ignore
             self.bkinfo["opf_file"] = opf_file
             opf_path = opf_file.split("/")
             disk_path = ""
@@ -1006,9 +1109,10 @@ class epub_paginator:
         with opf_filep.open("r") as opf_file:
             opf_dict = {}
             opf_dict = xmltodict.parse(opf_file.read())
-            # be sure we find a nav file
+            # be sure we find a nav file. By the time we get here,
+            # self.genplist true alos means that we have an epub3 file
             if self.genplist:
-                for item in opf_dict[opf_dictkey]["manifest"]["item"]: # type: ignore
+                for item in opf_dict[opf_dictkey]["manifest"]["item"]:  # type: ignore
                     if item.get("@properties") == "nav":
                         navf = Path(f"{path}/{disk_path}{item['@href']}")
                         self.bkinfo["nav_item"] = item["@href"]
@@ -1062,11 +1166,23 @@ class epub_paginator:
                                 self.bkinfo["match"] = False
         # we're good to go
         spine_lst = []
-        for spine_item in opf_dict[opf_dictkey]["spine"]["itemref"]: # type: ignore
+        for spine_item in opf_dict[opf_dictkey]["spine"]["itemref"]:  # type: ignore
             if self.DEBUG:
                 lstr = f"spine_item idref: {spine_item['@idref']}"
                 self.wrlog(False, lstr)
-            for m_item in opf_dict[opf_dictkey]["manifest"]["item"]: # type: ignore
+            # sometimes the manifest is opf:manifest, check this
+            # this only happens if we have an epub2 and didn't convert to epub3
+            if opf_dict[opf_dictkey].get("manifest", "fucked") != "fucked":  # type: ignore
+                manifest_key = "manifest"
+            elif opf_dict[opf_dictkey].get("opf:manifest", "epub2") != "epub2":  # type: ignore
+                manifest_key = "opf:manifest"
+            else:
+                self.wrlog(
+                    False, f"Fatal Error: Cannot find manifest in opf file"
+                )
+                self.rdict["fatal"] = True
+                return
+            for m_item in opf_dict[opf_dictkey][manifest_key]["item"]:  # type: ignore
                 if spine_item["@idref"] == m_item["@id"]:
                     if (
                         "toc" in m_item["@href"].casefold()
@@ -1157,9 +1273,7 @@ class epub_paginator:
             with efile.open("r") as ebook_rfile:
                 ebook_data = ebook_rfile.read()
                 if self.DEBUG:
-                    self.wrlog(
-                        False, f"The word count is {wdcnt:,} ."
-                    )
+                    self.wrlog(False, f"The word count is {wdcnt:,} .")
             body1 = ebook_data.find("<body")
             if body1 == -1:
                 self.rdict["errors"].append(
@@ -1178,7 +1292,6 @@ class epub_paginator:
                 while ebook_data[lidx] in ["\n", " ", "\t"]:
                     lidx += 1
                 ebook_data = ebook_data[lidx:]
-                # self.wrlog(True, f"5 process {ebook_data[:80]}")
                 if ebook_data[0] == "<":
                     stat = self.process_html(ebook_data)
                     if stat["done"]:
@@ -1205,12 +1318,22 @@ class epub_paginator:
         **Keyword arguments:**
         ebook_data - complete data from an xhtml file.
         """
-        with open("./xx.xhtml", "w") as xfile:
-            xfile.write(ebook_data)
+        # with open("./xx.xhtml", "w") as xfile:
+        #     xfile.write(ebook_data)
         dct = {}
-        dct = xmltodict.parse(ebook_data)
+        try:
+            dct = xmltodict.parse(ebook_data)
+        except:
+            estr = (
+                f"XML parsing error. If this is an epub2 file, try "
+                f"converting to epub3 before paginating."
+            )
+            self.wrlog(True, estr)
+            self.rdict["errors"].append(estr)
+            self.rdict["fatal"] = True
+            return ebook_data
         # print(f"xmlns: {dct['html']['@xmlns']}")
-        d = dct["html"] # type: ignore
+        d = dct["html"]  # type: ignore
         if d.get("@xmlns:epub", False):
             # self.wrlog(True, f"xmlns:epub namespace is found.")
             return ebook_data
@@ -1246,7 +1369,6 @@ class epub_paginator:
             efile = Path(
                 (f"{self.bkinfo['unzip_path']}/" f"{chapter['disk_file']}")
             )
-            self.wrlog(True, (f"Section scan: " f"{chapter['disk_file']}"))
             with efile.open("r") as ebook_rfile:
                 ebook_data = ebook_rfile.read()
             if self.bkinfo["match"]:
@@ -1308,9 +1430,9 @@ class epub_paginator:
                                 sct_pgcnt += 1
                                 book_curpg += 1
                             page_words = page_words - self.pgwords
-            if not self.bkinfo['match'] and self.DEBUG:
-                    lstr = f"Section page count is: {sct_pgcnt}"
-                    self.wrlog(False, lstr)
+            if not self.bkinfo["match"] and self.DEBUG:
+                lstr = f"Section page count is: {sct_pgcnt}"
+                self.wrlog(False, lstr)
             # store the section pagecount in the dictionary.
             if not self.bkinfo["match"]:
                 chapter["sct_pgcnt"] = sct_pgcnt
@@ -1461,8 +1583,6 @@ class epub_paginator:
                 else:
                     pgbook += ebook_data[:loc]
                     ebook_data = ebook_data[loc:]
-                # self.wrlog(True, f"Wordcount: {wdcnt}")
-        # self.wrlog(True, f"pgbook: {pgbook}")
         return pgbook  # }}}
 
     def scan_match_file(self, ebook_data, chapter):
@@ -1520,7 +1640,7 @@ class epub_paginator:
                     pgbook += ebook_data
                     not_done = False
                 else:
-                    loc = 0    # only here to reassure linter
+                    loc = 0  # only here to reassure linter
                     if loctitle != -1:
                         loc = loctitle
                         loc += len("title=")
@@ -1605,18 +1725,27 @@ class epub_paginator:
         """
         if self.epubcheck.casefold() == "none":
             return
-        t1 = time.perf_counter()
-        self.wrlog(True, "---------------------------")
+        epubchk_t1 = time.perf_counter()
+        self.wrlog(True, CR + "---------------------------")
         if original:
             self.wrlog(True, "Running epubcheck on original epub file:" + CR)
-            epubcheck_cmd = [self.epubcheck, "-e", self.epub_file]
+            if self.chk_warn:
+                epubcheck_cmd = [self.epubcheck, self.epub_file]
+            else:
+                epubcheck_cmd = [self.epubcheck, "-e", self.epub_file]
         else:
             self.wrlog(True, "Running epubcheck on paged epub file:" + CR)
-            epubcheck_cmd = [
-                self.epubcheck,
-                "-e",
-                (f"{self.outdir}/" f"{self.bkinfo['title']}.epub"),
-            ]
+            if self.chk_warn:
+                epubcheck_cmd = [
+                    self.epubcheck,
+                    f"{self.rdict['bk_outfile']}",
+                ]
+            else:
+                epubcheck_cmd = [
+                    self.epubcheck,
+                    "-e",
+                    f"{self.rdict['bk_outfile']}",
+                ]
         result = run(
             epubcheck_cmd, stdout=PIPE, stderr=PIPE, universal_newlines=True
         )
@@ -1631,7 +1760,8 @@ class epub_paginator:
                 if original:
                     self.rdict["orig_fatal"] = int(w[1])
                     self.rdict["orig_error"] = int(w[4])
-                    # self.rdict['orig_warn'] = int(w[7])
+                    if self.chk_warn:
+                        self.rdict["orig_warn"] = int(w[7])
                     if self.rdict["orig_fatal"]:
                         self.wrlog(
                             True,
@@ -1648,7 +1778,7 @@ class epub_paginator:
                                 f"errors reported in epubcheck."
                             ),
                         )
-                    if self.rdict["orig_warn"]:
+                    if self.rdict["orig_warn"] and self.chk_warn:
                         self.wrlog(
                             True,
                             (
@@ -1659,7 +1789,8 @@ class epub_paginator:
                 else:
                     self.rdict["echk_fatal"] = int(w[1])
                     self.rdict["echk_error"] = int(w[4])
-                    # self.rdict['echk_warn'] = int(w[7])
+                    if self.chk_warn:
+                        self.rdict["chk_warn"] = int(w[7])
                     if self.rdict["echk_fatal"]:
                         self.wrlog(
                             True,
@@ -1676,23 +1807,25 @@ class epub_paginator:
                                 f"errors reported in epubcheck."
                             ),
                         )
-                    # if self.rdict['echk_warn']:
-                    #     estr = (f"--> {self.rdict['echk_warn']} warnings "
-                    #             f"reported in epubcheck.")
-                    #     self.wrlog(True, estr)
-                    #
-                    #                 f"reported in epubcheck."))
+                    if self.rdict["chk_warn"] and self.chk_warn:
+                        estr = (
+                            f"--> {self.rdict['chk_warn']} warnings "
+                            f"reported in epubcheck."
+                        )
+                        self.wrlog(True, estr)
+
         if original:
-            self.wrlog(True, "-------Epubcheck Original Output------")
+            self.wrlog(True, "-------Epubcheck Original Output------" + CR)
         else:
-            self.wrlog(True, "-------Epubcheck Paged Output---------")
-        self.wrlog(True, "")
-        # stdout_lines = result.stdout.splitlines()
+            self.wrlog(True, "-------Epubcheck Paged Output---------" + CR)
         self.wrlog(True, result.stdout)
         if len(result.stderr) > 0:
             self.wrlog(False, result.stderr)
-        t2 = time.perf_counter()
-        self.wrlog(True, f"    epubcheck took {t2-t1:.2f} seconds.")
+        epubchk_t2 = time.perf_counter()
+        if original:
+            self.rdict["epubchkorig_time"] = epubchk_t2 - epubchk_t1
+        else:
+            self.rdict["epubchkpage_time"] = epubchk_t2 - epubchk_t1
         self.wrlog(True, "--End Epubcheck Output-----")
         self.wrlog(True, "\n")
         return
@@ -1737,7 +1870,7 @@ class epub_paginator:
 
         """
 
-        t1pagination= time.perf_counter()
+        t1pagination = time.perf_counter()
         # re-initialize on each call
         self.curpg = 1
         self.tot_wcnt = 0
@@ -1748,6 +1881,8 @@ class epub_paginator:
         self.rdict["logfile"] = ""
         self.rdict["bk_outfile"] = ""
         self.rdict["logfile"] = ""
+        self.rdict["version"] = ""
+        self.rdict["converted"] = False
         self.rdict["errors"] = []
         self.rdict["fatal"] = False
         self.rdict["error"] = False
@@ -1757,7 +1892,7 @@ class epub_paginator:
         self.rdict["orig_warn"] = 0
         self.rdict["echk_fatal"] = 0
         self.rdict["echk_error"] = 0
-        self.rdict["echk_warn"] = 0
+        self.rdict["chk_warn"] = 0
         self.rdict["messages"] = ""
         self.get_bkinfo()
         if self.rdict["fatal"]:
@@ -1775,6 +1910,7 @@ class epub_paginator:
         # scan the book to count words, section pages and total pages based on
         # words/page
         self.count_words()
+        self.wrlog(True, f"Begin section scan.")
         self.scan_sections()
         for key in self.bkinfo:
             if key != "spine_lst":
@@ -1835,6 +1971,7 @@ class epub_paginator:
         # this is the working loop. Scan each file, locate pages and insert
         # page-links and/or pagelines or superscripts
         self.curpg = 1
+        self.wrlog(True, "Begin pagination, scanning spine.")
         for chapter in self.bkinfo["spine_lst"]:
             if self.DEBUG:
                 lstr = (
@@ -1852,12 +1989,7 @@ class epub_paginator:
             )
             with ewfile.open("w") as ebook_wfile:
                 start_total = self.tot_wcnt
-                lstr = (
-                    f"Scanning {chapter['disk_file']}; "
-                    f"start_total: {start_total} "
-                    f"self.tot_wcnt: "
-                    f"{self.tot_wcnt}"
-                )
+                lstr = f"Scanning {chapter['disk_file']}"
                 self.wrlog(True, lstr)
                 if self.bkinfo["match"]:
                     if self.DEBUG:
@@ -1871,7 +2003,11 @@ class epub_paginator:
                 else:
                     new_ebook = self.scan_file(ebook_data, chapter)
                 xebook_data = self.chk_xmlns(new_ebook)
+                if self.rdict["fatal"]:
+                    return self.rdict
                 ebook_wfile.write(xebook_data)
+        if self.rdict["fatal"]:
+            return self.rdict
         if self.bkinfo["match"]:
             w_per_page = self.bkinfo["words"] / self.bkinfo["pages"]
             lstr = (
@@ -1909,7 +2045,32 @@ class epub_paginator:
                 rm_cmd, stdout=PIPE, stderr=PIPE, universal_newlines=True
             )
         t2pagination = time.perf_counter()
-        self.wrlog(True, f"{self.rdict['bk_outfile']}")
-        self.wrlog(True, f"    Paginated in {t2pagination-t1pagination:.2f} seconds.")
         self.run_chk(False)
+        self.wrlog(
+            True, f"The paged epub is at: {self.rdict['bk_outfile']}" + CR
+        )
+        self.rdict["paginate_time"] = (
+            (t2pagination - t1pagination)
+            - self.rdict["epubchkorig_time"]
+            - self.rdict["convert_time"]
+        )
+        ttime = (
+            self.rdict["paginate_time"]
+            + self.rdict["epubchkorig_time"]
+            + self.rdict["convert_time"]
+            + self.rdict["epubchkpage_time"]
+        )
+        self.wrlog(True, f"total processing time was {ttime:.2f} seconds")
+        self.wrlog(
+            True,
+            f"    epubcheck original took {self.rdict['epubchkorig_time']:.2f} seconds.",
+        )
+        self.wrlog(
+            True,
+            f"    epubcheck paged took {self.rdict['epubchkpage_time']:.2f} seconds.",
+        )
+        self.wrlog(
+            True,
+            f"    Pagination took {self.rdict['paginate_time']:.2f} seconds.",
+        )
         return self.rdict
