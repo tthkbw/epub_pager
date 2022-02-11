@@ -7,7 +7,7 @@ from pathlib import Path
 import argparse
 from typing import Dict
 
-from epub_pager import epub_paginator
+from epubpager import epub_paginator
 
 epubcheck = "/opt/homebrew/bin/epubcheck"
 BookFileName = Path("/Users/tbrown/Documents/projects/BookTally/Books.json")
@@ -70,8 +70,9 @@ def set_params(paginator):
     paginator.chap_pgtot = config["chap_pgtot"]
     paginator.chap_bkt = config["chap_bkt"]
     paginator.ebookconvert = config["ebookconvert"]
-    paginator.epubcheck = config["epubcheck"]
+    paginator.epubcheck= config["epubcheck"]
     paginator.chk_orig = config["chk_orig"]
+    paginator.chk_paged= config["chk_paged"]
     paginator.DEBUG = config["DEBUG"]
 
 
@@ -114,10 +115,8 @@ edb = {
     "pager_warn": 0,
     "orig_fatal": 0,
     "orig_error": 0,
-    "orig_warn": 0,
     "echk_fatal": 0,
     "echk_error": 0,
-    "echk_warn": 0,
 }
 # and a list of results
 edb_list = []
@@ -128,10 +127,8 @@ pager_error_errcnt = 0
 pager_warn_errcnt = 0
 orig_fatal_errcnt = 0
 orig_error_errcnt = 0
-orig_warn_errcnt = 0
 echk_fatal_errcnt = 0
 echk_error_errcnt = 0
-echk_warn_errcnt = 0
 start = args.start
 max_count = args.start + args.count
 if not args.quiet:
@@ -150,10 +147,8 @@ for book in BookArray:
     b_edb["pager_warn"] = 0
     b_edb["orig_fatal"] = 0
     b_edb["orig_error"] = 0
-    b_edb["orig_warn"] = 0
     b_edb["echk_fatal"] = 0
     b_edb["echk_error"] = 0
-    b_edb["echk_warn"] = 0
     format_list = book["formats"]
     for booktype in format_list:
         booksplit = booktype.split("/")
@@ -174,17 +169,14 @@ for book in BookArray:
             set_params(paginator)
             rdict = paginator.paginate_epub(booktype)
             # report the results
-            b_edb["pager_fatal"] = rdict["fatal"]
-            b_edb["pager_error"] = rdict["error"]
-            b_edb["pager_warn"] = rdict["warn"]
+            b_edb["pager_error"] = rdict["pager_error"]
+            b_edb["pager_warn"] = rdict["pager_warn"]
             b_edb["echk_fatal"] = rdict["echk_fatal"]
             b_edb["echk_error"] = rdict["echk_error"]
-            b_edb["echk_warn"] = rdict["echk_warn"]
             b_edb["orig_fatal"] = rdict["orig_fatal"]
             b_edb["orig_error"] = rdict["orig_error"]
-            b_edb["orig_warn"] = rdict["orig_warn"]
             b_edb["converted"] = rdict["converted"]
-            b_edb["version"] = rdict["version"]
+            b_edb["version"] = rdict["epub_version"]
             one_fatal = False
             one_error = False
             one_warn = False
@@ -227,13 +219,6 @@ for book in BookArray:
                     f"--> echk Errors occurred in book {booktype:.50}; book"
                     f" number:{epub_count}:"
                 )
-            if b_edb["echk_warn"]:
-                one_warn = True
-                echk_warn_errcnt += 1
-                print(
-                    f"--> echk Warnings occurred in book {booktype:.50}; book"
-                    f" number:{epub_count}:"
-                )
             if b_edb["orig_fatal"]:
                 one_fatal = True
                 orig_fatal_errcnt += 1
@@ -246,13 +231,6 @@ for book in BookArray:
                 orig_error_errcnt += 1
                 print(
                     f"--> orig Errors occurred in book {booktype:.50}; book"
-                    f" number:{epub_count}:"
-                )
-            if b_edb["orig_warn"]:
-                one_warn = True
-                orig_warn_errcnt += 1
-                print(
-                    f"--> orig Warnings occurred in book {booktype:.50}; book"
                     f" number:{epub_count}:"
                 )
             if one_fatal or one_error or one_warn:
@@ -275,45 +253,34 @@ print(
     f"---> {orig_fatal_errcnt} original books had fatal errors in epubcheck."
 )
 print(f"---> {orig_error_errcnt} original books had errors in epubcheck.")
-print(f"---> {orig_warn_errcnt} original books had warnings in epubcheck.")
 print("--------------------")
 print(f"---> {echk_fatal_errcnt} paged books had fatal errors in epubcheck.")
 print(f"---> {echk_error_errcnt} paged books had errors in epubcheck.")
-print(f"---> {echk_warn_errcnt} paged books had warnings in epubcheck.")
 print("--------------------")
 print()
 
 # compare epubcheck errors for before and after paging.
-linelen = 60
-p_result(linelen, 3, "epubcheck Difference Comparison")
-for book in edb_list:
-    if book["echk_fatal"] != book["orig_fatal"]:
-        p_result(linelen, 3, book["title"])
-        p_result(linelen, 10, "Fatal Errors")
-        print(
-            f"  --> {book['echk_fatal']:3} fatal error(s) in paged book epubcheck."
-        )
-        print(
-            f"  --> {book['orig_fatal']:3} fatal error(s) in original book epubcheck."
-        )
-        p_result(linelen, 0, "")
-    if book["echk_error"] != book["orig_error"]:
-        p_result(linelen, 3, book["title"])
-        p_result(linelen, 10, "Errors")
-        print(
-            f"  --> {book['echk_error']:3} error(s) in paged book epubcheck."
-        )
-        print(
-            f"  --> {book['orig_error']:3} error(s) in original book epubcheck."
-        )
-        p_result(linelen, 0, "")
-    if book["echk_warn"] != book["orig_warn"]:
-        p_result(linelen, 3, book["title"])
-        p_result(linelen, 10, "Warnings")
-        print(
-            f"  --> {book['echk_warn']:3} warning(s) in paged book epubcheck."
-        )
-        print(
-            f"  --> {book['orig_warn']:3} warning(s) in original book epubcheck."
-        )
-        p_result(linelen, 0, "")
+if config['chk_orig'] and config['chk_paged']:
+    linelen = 60
+    p_result(linelen, 3, "epubcheck Difference Comparison")
+    for book in edb_list:
+        if book["echk_fatal"] != book["orig_fatal"]:
+            p_result(linelen, 3, book["title"])
+            p_result(linelen, 10, "Fatal Errors")
+            print(
+                f"  --> {book['echk_fatal']:3} fatal error(s) in paged book epubcheck."
+            )
+            print(
+                f"  --> {book['orig_fatal']:3} fatal error(s) in original book epubcheck."
+            )
+            p_result(linelen, 0, "")
+        if book["echk_error"] != book["orig_error"]:
+            p_result(linelen, 3, book["title"])
+            p_result(linelen, 10, "Errors")
+            print(
+                f"  --> {book['echk_error']:3} error(s) in paged book epubcheck."
+            )
+            print(
+                f"  --> {book['orig_error']:3} error(s) in original book epubcheck."
+            )
+            p_result(linelen, 0, "")
