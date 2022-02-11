@@ -41,6 +41,9 @@ class epub_paginator:
 
     **Version 3.0**
     1. Shoot the engineer and ship the product.
+    1. Had the sense wrong on has_echk test. Now check self.epubcheck for
+    file.is_file rather than existence (which returns true if the string is
+    empty).
 
     **Version 2.99**
     1. Implement placing pagebreaks and supers at exact word position
@@ -1845,7 +1848,6 @@ class epub_paginator:
                                 f"errors reported in epubcheck."
                             ),
                         )
-        stdout_lines = result.stdout.splitlines()
         self.wrlog(False, result.stdout)
         if len(result.stderr) > 0:
             self.wrlog(False, result.stderr)
@@ -1868,23 +1870,23 @@ class epub_paginator:
         self.wrlog(False, CR + "---------------------------")
         if original:
             echk_result = EpubCheck(self.epub_file)
-            self.rdict["orig_fatal"] = echk_result.result_data["checker"]["nFatal"]
-            self.rdict["orig_error"] = echk_result.result_data["checker"]["nError"]
-            self.rdict["orig_warn"] = echk_result.result_data["checker"]["nWarning"]
+            self.rdict["orig_fatal"] = echk_result.result_data["checker"]["nFatal"]  # type: ignore
+            self.rdict["orig_error"] = echk_result.result_data["checker"]["nError"]  # type: ignore
+            self.rdict["orig_warn"] = echk_result.result_data["checker"]["nWarning"]  # type: ignore
             self.rdict["epubchkorig_time"] = (
-                echk_result.result_data["checker"]["elapsedTime"] / 1000.0
+                echk_result.result_data["checker"]["elapsedTime"] / 1000.0  # type: ignore
             )
             if echk_result.valid:
                 self.wrlog(
                     True,
-                    f"For {echk_result.result_data['checker']['path']} epubcheck reports no errors.",
+                    f"For {echk_result.result_data['checker']['path']} epubcheck reports no errors.",  # type: ignore
                 )
             else:
                 self.wrlog(
                     True,
-                    f"For {echk_result.result_data['checker']['path']} epubcheck reported errors.",
+                    f"For {echk_result.result_data['checker']['path']} epubcheck reported errors.",  # type: ignore
                 )
-            for errdict in echk_result.result_data["messages"]:
+            for errdict in echk_result.result_data["messages"]:  # type: ignore
                 if errdict["severity"] == "ERROR" or errdict["severity"] == "FATAL":
                     self.wrlog(False, f"{errdict['message']}")
                     for loc in errdict["locations"]:
@@ -1894,22 +1896,22 @@ class epub_paginator:
                         )
         else:
             echk_result = EpubCheck(self.rdict["bk_outfile"])
-            self.rdict["echk_fatal"] = echk_result.result_data["checker"]["nFatal"]
-            self.rdict["echk_error"] = echk_result.result_data["checker"]["nError"]
+            self.rdict["echk_fatal"] = echk_result.result_data["checker"]["nFatal"]  # type: ignore
+            self.rdict["echk_error"] = echk_result.result_data["checker"]["nError"]  # type: ignore
             self.rdict["epubchkpage_time"] = (
-                echk_result.result_data["checker"]["elapsedTime"] / 1000.0
+                echk_result.result_data["checker"]["elapsedTime"] / 1000.0  # type: ignore
             )
             if echk_result.valid:
                 self.wrlog(
                     True,
-                    f"For {echk_result.result_data['checker']['path']} epubcheck reports no errors.",
+                    f"For {echk_result.result_data['checker']['path']} epubcheck reports no errors.",  # type: ignore
                 )
             else:
                 self.wrlog(
                     True,
-                    f"For {echk_result.result_data['checker']['path']} epubcheck reported errors.",
+                    f"For {echk_result.result_data['checker']['path']} epubcheck reported errors.",  # type: ignore
                 )
-            for errdict in echk_result.result_data["messages"]:
+            for errdict in echk_result.result_data["messages"]:  # type: ignore
                 if errdict["severity"] == "ERROR" or errdict["severity"] == "FATAL":
                     self.wrlog(False, f"{errdict['message']}")
                     for loc in errdict["locations"]:
@@ -1942,17 +1944,16 @@ class epub_paginator:
         **_original_** -- Original file or paged output file to be
         checked
         """
-        # self.wrlog(False, f" --> run_chk")
-        if self.epubcheck.casefold() == "none":
-            if not has_echk:
+        if Path(self.epubcheck).is_file():
+            self.wrlog(False, f"Running external epubcheck.")
+            self.run_chk_external(original)
+        else:
+            if has_echk:
                 self.wrlog(False, f"Running python module epubcheck.")
                 self.run_chk_python(original)
             else:
                 self.wrlog(False, f" --> No epubcheck is available.")
                 return
-        else:
-            self.wrlog(False, f"Running external epubcheck.")
-            self.run_chk_external(original)
 
     def paginate_epub(self, source_epub) -> typing.Dict:
 
