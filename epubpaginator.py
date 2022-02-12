@@ -4,17 +4,16 @@ import json
 import argparse
 from pathlib import Path
 from epubpager import epub_paginator
-from typing import Dict
 
 # Version 1.0
 # Added argparse for parsing command line options. There are options to set and
 # default values for every option that epub_pager supports.
 # changed name of footer to pageline
 
-# default_cfg = {
-#     "outdir": "/Users/tbrown/data_store/paged_epubs",
-#     "match": False,
+# Defaults for all options
+#     "outdir": "./",
 #     "genplist": True,
+#     "match": False,
 #     "pgwords": 300,
 #     "pages": 0,
 #     "pageline": False,
@@ -143,10 +142,10 @@ def main():
         default="none",
     )
     parser.add_argument(
-        "--chk_paged", 
-        help="Run epubcheck on paged epub file", 
-        action = "store_true",
-        default = False,
+        "--chk_paged",
+        help="Run epubcheck on paged epub file",
+        action="store_true",
+        default=False,
     )
     parser.add_argument(
         "--chk_orig",
@@ -176,7 +175,9 @@ def main():
                 with cfile.open("r") as config_file:
                     return dict(json.loads(config_file.read()))
             else:
-                print(f" --> Aborted: Specified configuration file {args.cfg} not found.")
+                print(
+                    f" --> Aborted: Specified configuration file {args.cfg} not found."
+                )
                 return dict({})
         else:
             # no config file, build the config from the parameters
@@ -205,7 +206,6 @@ def main():
             config["DEBUG"] = args.DEBUG
             return dict(config)
 
-
     # get the config file to set things up
     config = get_config(args)
     paginator = epub_paginator()
@@ -227,11 +227,10 @@ def main():
     paginator.chap_pgtot = config["chap_pgtot"]
     paginator.chap_bkt = config["chap_bkt"]
     paginator.ebookconvert = config["ebookconvert"]
-    paginator.epubcheck= config["epubcheck"]
+    paginator.epubcheck = config["epubcheck"]
     paginator.chk_orig = config["chk_orig"]
-    paginator.chk_paged= config["chk_paged"]
+    paginator.chk_paged = config["chk_paged"]
     paginator.DEBUG = config["DEBUG"]
-
 
     lpad = 10
     rpad = 50
@@ -259,12 +258,17 @@ def main():
     # if return_dict["converted"]:
     #     print(f" --> This epub book was converted to epub3.")
     if return_dict["pager_error"]:
-        pager_err= True
+        pager_err = True
         # print()
-        print(" --> Fatal errors occurred in epub_pager. Book may not be properly paginated.")
-        if return_dict['epub_version'][0] == '2':
-            print(" --> This is an ePub2 book. Often if books are first converted to ePub3 epubpaginator can successfully paginate them.")
-            for e in return_dict['error_lst']:
+        print(
+            " --> Fatal errors occurred in epub_pager. Book may not be properly paginated."
+        )
+        if return_dict["epub_version"][0] == "2":
+            print(
+                " --> This is an ePub2 book. Often if books are first converted to ePub3 "
+                "epubpaginator can successfully paginate them."
+            )
+            for e in return_dict["error_lst"]:
                 print(f"   --> {e}")
             print(f"See details in log: {return_dict['logfile']}")
 
@@ -272,9 +276,9 @@ def main():
     pager_err = False
     pager_warn = False
     if return_dict["pager_warn"]:
-        pager_warn= True
+        pager_warn = True
         print("  --> There were warnings in epub_pager.")
-        for w in return_dict['warn_lst']:
+        for w in return_dict["warn_lst"]:
             print(f"   --> {w}")
         print(f"See details in log: {return_dict['logfile']}")
     if return_dict["echk_fatal"] or return_dict["orig_fatal"]:
@@ -282,9 +286,13 @@ def main():
         s = "Fatal Errors"
         print()
         print(f"{'-' * lpad}{s}{'-' * (rpad - len(s))}")
-        print(f"  --> {return_dict['echk_fatal']:3} fatal " f"error(s) in paged book epubcheck.")
         print(
-            f"  --> {return_dict['orig_fatal']:3} fatal " f"error(s) in original book epubcheck."
+            f"  --> {return_dict['echk_fatal']:3} fatal "
+            f"error(s) in paged book epubcheck."
+        )
+        print(
+            f"  --> {return_dict['orig_fatal']:3} fatal "
+            f"error(s) in original book epubcheck."
         )
     if return_dict["echk_error"] or return_dict["orig_error"]:
         echk_err = True
@@ -292,7 +300,9 @@ def main():
         print()
         print(f"{'-' * lpad}{s}{'-' * (rpad - len(s))}")
         print(f"  --> {return_dict['echk_error']:3} error(s) in paged book epubcheck.")
-        print(f"  --> {return_dict['orig_error']:3} error(s) in original book epubcheck.")
+        print(
+            f"  --> {return_dict['orig_error']:3} error(s) in original book epubcheck."
+        )
     if not pager_err and not pager_warn and not echk_err:
         print()
         print(f"Processing completed without error.")
@@ -300,6 +310,7 @@ def main():
             print(f"Paginated ebook created: {return_dict['bk_outfile']}")
     print("-" * (lpad + rpad))
     print()
+
 
 if __name__ == "__main__":
     main()

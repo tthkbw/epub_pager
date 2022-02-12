@@ -743,9 +743,9 @@ class epub_paginator:
         The message to print
 
         """
-        if (stdout):
+        if stdout:
             print(message)
-            self.rdict['messages'] += '\n' + message
+            self.rdict["messages"] += "\n" + message
         with self.logpath.open("a") as logfile:
             logfile.write(message + "\n")
 
@@ -1580,7 +1580,9 @@ class epub_paginator:
                     if insfoot and pl_lst:
                         for pl in pl_lst:
                             pgbook += pl
-                            self.wrlog(False, f"Inserting pageline: {pl} in {chapter['href']}")
+                            self.wrlog(
+                                False, f"Inserting pageline: {pl} in {chapter['href']}"
+                            )
                         pl_lst = []
             else:
                 # we are at the beginning of a text string, just past
@@ -1590,8 +1592,10 @@ class epub_paginator:
                 self.pg_wcnt += wdcnt
                 if self.pg_wcnt > self.pgwords:
                     need = self.pg_wcnt - self.pgwords
-                    self.wrlog(False, (f"Page boundary. pg_wcnt: "
-                                      f"{self.pg_wcnt}. need: {need}"))
+                    self.wrlog(
+                        False,
+                        (f"Page boundary. pg_wcnt: " f"{self.pg_wcnt}. need: {need}"),
+                    )
                     # build and stage a pageline because we are at a page
                     # boundary
                     if self.pageline:
@@ -1795,7 +1799,7 @@ class epub_paginator:
             epubcheck_cmd = [self.epubcheck, self.epub_file]
         else:
             self.wrlog(True, "Running external epubcheck on paged epub file:")
-            epubcheck_cmd = [self.epubcheck, self.rdict['bk_outfile']]
+            epubcheck_cmd = [self.epubcheck, self.rdict["bk_outfile"]]
         result = run(epubcheck_cmd, stdout=PIPE, stderr=PIPE, universal_newlines=True)
         # check and log the errors from epubcheck
         err = False
@@ -1865,7 +1869,9 @@ class epub_paginator:
         return
 
     def run_chk_python(self, original):
-        self.wrlog(True, f"Running python module epubcheck--this will take a while . . .")
+        self.wrlog(
+            True, f"Running python module epubcheck--this will take a while . . ."
+        )
         t1 = time.perf_counter()
         self.wrlog(False, CR + "---------------------------")
         if original:
@@ -2039,9 +2045,9 @@ class epub_paginator:
             self.rdict["pager_error"] = True
             return self.rdict
 
-        if self.epubcheck.casefold() != 'none' and (self.chk_orig or self.chk_paged):
+        if self.epubcheck.casefold() != "none" and (self.chk_orig or self.chk_paged):
             self.wrlog(False, f"External epubcheck will be run.")
-        elif has_echk and (self.chk_orig or self.chk_paged): 
+        elif has_echk and (self.chk_orig or self.chk_paged):
             self.wrlog(False, f"Python epubcheck module will be run.")
         else:
             self.wrlog(False, f"No epubcheck is available.")
@@ -2080,7 +2086,7 @@ class epub_paginator:
         self.rdict["unzip_path"] = Path(f"{self.outdir}/{self.rdict['title']}")
         # this gets epub version without unzipping
         epub_ver = self.get_epub_version(self.epub_file)
-        self.wrlog(True,f"Original file is epub version {epub_ver}")
+        self.wrlog(True, f"Original file is epub version {epub_ver}")
         if epub_ver[0] != "3":
             if self.ebookconvert.casefold() != "none":
                 # convert either gives us an epub3 or a fatal error
