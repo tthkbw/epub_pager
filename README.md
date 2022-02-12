@@ -284,17 +284,24 @@ of the options 'pgwords' and 'pages' as follows:
 
 [epubcheck](https://www.w3.org/publishing/epubcheck/docs/getting-started/) may be
 used to check the original epub and the paginated epub for errors. there
-are two alternatives for epubcheck--and [external
+are two alternatives for epubcheck--an [external
 epubcheck](https://www.w3.org/publishing/epubcheck/).
 or the [Python epubcheck module](https://pypi.org/project/epubcheck/).
 
-To use the external epubcheck set the --epubcheck configuration option
-to the path of your version of epubcheck and set --chk_paged and
---chk_orig as desired.
+The simplest way to run epubcheck is to use the Python epubcheck module. To
+install run `pip install epubcheck`. If the epubcheck module is installed,
+epubpaginator will use it preference to the external epubcheck. The
+disadvantage of the Python epubcheck module is performance--it is about 5 times
+slower than running an external version of epubcheck. On most epub files the
+Python epubcheck will take ten or more seconds to run, compared to about two
+seconds for the external version.
 
-To use the Python epubcheck module, install it with `pip install
-epubcheck`. If the epubcheck module is installed, epubpaginator will use
-it preference to the external epubcheck. 
+To use the external epubcheck set the --epubcheck configuration option
+to point to a script for your system that runs epubcheck and requires only a
+filename as input. Set --chk_paged and --chk_orig as desired. Included in the
+zipfile is a unix script, epubcheck.sh, which runs the Homebrew version of
+epubcheck on a mac, and epubcheck.bat which is an example of a batch file to
+run epubcheck on Windows.
 
 #### epubcheck Comments
 
@@ -304,11 +311,14 @@ it preference to the external epubcheck.
    seconds. 
 2. The Python module epubcheck is even slower and will take an average
    of about 10 seconds to check a file.
-3. Many epub files, particularly older files, will cause epubcheck to
-   generate multiple errors, often dozens or even hundreds of errors.
-   epubpaginator simply reports these errors and whether there was a
-   difference in the number of warnings, errors, or fatal errors between
-   the check of the original book and the paginated book. 
+3. Many epub files, particularly older files, will cause epubcheck to generate
+   multiple errors, often dozens or even hundreds of errors, and even more
+   warnings. It is recommended to run epubcheck with the `-e` option to report
+   only errors, not warnings. The example scripts do this, and epubpaginator
+   does this when running the Python epubchek module. epubpaginator simply
+   reports these errors and whether there was a difference in the number of
+   warnings, errors, or fatal errors between the check of the original book and
+   the paginated book. 
 4. Fortunately, most epub readers are very forgiving of warnings, errors
    and fatal errors reported by epubcheck. While it is common for
    epubcheck to report errors and even fatal errors, it is relatively

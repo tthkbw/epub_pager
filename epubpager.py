@@ -44,6 +44,10 @@ class epub_paginator:
     1. Had the sense wrong on has_echk test. Now check self.epubcheck for
     file.is_file rather than existence (which returns true if the string is
     empty).
+    1. to facilitate compatibility across platforms, the epubcheck parameter
+    now points to an executable script that runs epubcheck and takes as input a
+    epub filename. Examples are included wit the distribution, epubcheck.sh for
+    unix and epubcheck.bat for Windows.
 
     **Version 2.99**
     1. Implement placing pagebreaks and supers at exact word position
@@ -1788,14 +1792,10 @@ class epub_paginator:
         self.wrlog(False, "---------------------------")
         if original:
             self.wrlog(True, "Running external epubcheck on original epub file:")
-            epubcheck_cmd = [self.epubcheck, "-e", self.epub_file]
+            epubcheck_cmd = [self.epubcheck, self.epub_file]
         else:
             self.wrlog(True, "Running external epubcheck on paged epub file:")
-            epubcheck_cmd = [
-                self.epubcheck,
-                "-e",
-                (f"{self.rdict['bk_outfile']}"),
-            ]
+            epubcheck_cmd = [self.epubcheck, self.rdict['bk_outfile']]
         result = run(epubcheck_cmd, stdout=PIPE, stderr=PIPE, universal_newlines=True)
         # check and log the errors from epubcheck
         err = False
