@@ -140,7 +140,8 @@ An example configuration file "epub_pager.cfg" is provided:
 The configuration file is in json and must use json syntax,
 not python syntax.
 
-I have included an epub file, FarmBoy.epub for test purposes. You can paginate it and see how everything works. 
+I have included an epub file, FarmBoy.epub for testing. You can paginate it and
+see how everything works. 
 
 Shamelss plug: _Farm Boy_ is copyright by me and is the story of my childhood. Enjoy--and when
 you can't resist recommending it to others, send them the [Amazon
