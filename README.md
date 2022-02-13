@@ -43,7 +43,7 @@ epubpaginator is a command-line tool that can be configured with
 command line options, or by referencing a configuration file. The
 configuration file is in json format. Common problems include the specification
 of booleans (json uses 'true' and 'false') and paths (for paths, use '/' as the
-directory separator, not '\' as expected on Windows).
+directory separator, not '\\' as expected on Windows).
 
 Download the zip file from [Github](https://github.com/tthkbw/epub_pager) and
 unzip into a directory of your choice. From that directory, run:
