@@ -39,12 +39,20 @@ class epub_paginator:
 
     **Release Notes**
 
+    **Version 3.1**
+    Finding bugs
+    1. using the shell script to simplify cross-platform compatibility causes
+    problems with filenames with spaces. Copy the source_epub to a new filename
+    with spaces removed to fix this.
+    1. Oops! If the filename doesn't change when spaces are removed, then the
+    copy fails. Add '_orig' to the input epub filename.
+
     **Version 3.0**
     1. Shoot the engineer and ship the product.
     1. Had the sense wrong on has_echk test. Now check self.epubcheck for
     file.is_file rather than existence (which returns true if the string is
     empty).
-    1. to facilitate compatibility across platforms, the epubcheck parameter
+    1. To facilitate compatibility across platforms, the epubcheck parameter
     now points to an executable script that runs epubcheck and takes as input a
     epub filename. Examples are included wit the distribution, epubcheck.sh for
     unix and epubcheck.bat for Windows.
@@ -2045,8 +2053,9 @@ class epub_paginator:
         self.wrlog(False, echk_message)
 
         # copy the source epub file to stem_name
-        self.epub_file = f"{self.outdir}/{stem_name}"
+        self.epub_file = f"{self.outdir}/{self.rdict['title']}_orig.epub"
         shutil.copyfile(source_epub,self.epub_file)
+        self.wrlog(True,f"Operating on epub file: {self.epub_file}")
         if self.epubcheck.casefold() != "none" and (self.chk_orig or self.chk_paged):
             self.wrlog(False, f"External epubcheck will be run.")
         elif has_echk and (self.chk_orig or self.chk_paged):
