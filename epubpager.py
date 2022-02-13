@@ -392,8 +392,8 @@ class epub_paginator:
 
         """
         self.outdir = "/Users/tbrown/Documents/projects/" "BookTally/paged_epubs"
-        self.match = True
         self.genplist = True
+        self.match = True
         self.pgwords = 300
         self.pages = 0
         self.pageline = False
@@ -1993,7 +1993,6 @@ class epub_paginator:
         self.pg_wcnt = 0
         self.plist = ""
         self.bk_flist = []
-        self.epub_file = source_epub
 
         self.rdict["logfile"] = ""  # logfile Path
         self.rdict["bk_outfile"] = ""  # outfile Path
@@ -2029,7 +2028,13 @@ class epub_paginator:
         # initialize logfile
         # The epub name is the book file name with spaces removed and '.epub'
         # removed.
-        dirsplit = self.epub_file.split("/")
+        if not Path(source_epub).is_file():
+            self.wrlog(False, "Fatal error: Source epub not found.")
+            self.rdict["error_lst"].append("Fatal error: Source epub not found.")
+            self.rdict["pager_error"] = True
+            return self.rdict
+
+        dirsplit = source_epub.split("/")
         stem_name = dirsplit[len(dirsplit) - 1].replace(" ", "")
         self.rdict["title"] = stem_name.replace(".epub", "")
         self.logpath = Path(f"{self.outdir}/{self.rdict['title']}.log")
@@ -2039,12 +2044,9 @@ class epub_paginator:
 
         self.wrlog(False, echk_message)
 
-        if not Path(self.epub_file).is_file():
-            self.wrlog(False, "Fatal error: Source epub not found.")
-            self.rdict["error_lst"].append("Fatal error: Source epub not found.")
-            self.rdict["pager_error"] = True
-            return self.rdict
-
+        # copy the source epub file to stem_name
+        self.epub_file = f"{self.outdir}/{stem_name}"
+        shutil.copyfile(source_epub,self.epub_file)
         if self.epubcheck.casefold() != "none" and (self.chk_orig or self.chk_paged):
             self.wrlog(False, f"External epubcheck will be run.")
         elif has_echk and (self.chk_orig or self.chk_paged):
@@ -2261,6 +2263,7 @@ class epub_paginator:
         # and if DEBUG is not set, we remove the unzipped epub directory
         if not self.DEBUG:
             shutil.rmtree(self.rdict["unzip_path"], ignore_errors=True)
+            Path.unlink(Path(self.epub_file))
         t2pagination = time.perf_counter()
         if self.chk_paged:
             self.run_chk(False)
