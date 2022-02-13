@@ -140,6 +140,13 @@ An example configuration file "epub_pager.cfg" is provided:
 The configuration file is in json and must use json syntax,
 not python syntax.
 
+I have included an epub file, FarmBoy.epub for test purposes. You can paginate it and see how everything works. 
+
+Shamelss plug: _Farm Boy_ is copyright by me and is the story of my childhood. Enjoy--and when
+you can't resist recommending it to others, send them the [Amazon
+link](https://www.amazon.com/Farm-Boy-Terrence-L-Brown-ebook/dp/B005R1ZZLQ/ref=sr_1_1?crid=1JG9GJJY1XZRO&keywords=farm+boy+Terrence+L.+Brown&qid=1644710422&sprefix=farm+boy+terrence+l.+brown%2Caps%2C110&sr=8-1)
+where they can purchase the book. Maybe I'll get rich.
+
 ## Why Paginate?
 
 Most epub readers display page numbers that are based on what fits on the
