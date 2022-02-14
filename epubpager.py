@@ -12,6 +12,7 @@ CR = "\n"
 opf_dictkey = "package"
 pglnk = "pagetb"
 epubns = 'xmlns:epub="http://www.idpf.org/2007/ops"'
+pg_xmlns = f'<nav {epubns} epub:type="page-list" id="page-list" hidden="hidden"><ol> \n'
 
 has_echk = True
 try:
@@ -40,12 +41,18 @@ class epub_paginator:
     **Release Notes**
 
     **Version 3.1**
-    Finding bugs
+    Finding bugs in 3.0
     1. using the shell script to simplify cross-platform compatibility causes
     problems with filenames with spaces. Copy the source_epub to a new filename
     with spaces removed to fix this.
     1. Oops! If the filename doesn't change when spaces are removed, then the
     copy fails. Add '_orig' to the input epub filename.
+    1. By default, add xmlns locally to the added page-list element. Some files
+    do this locally and I find the naamespace and don't add my own. But since
+    the existing one is only local, my added pagelist is not recognized. Fixed
+    to scan only <html> element. this works for normal text files, i.e. files
+    with text for the book. For the nav file, we no longer use this scan and
+    add feature. Instead, just add locally to my page-list element.
 
     **Version 3.0**
     1. Shoot the engineer and ship the product.
@@ -530,10 +537,7 @@ class epub_paginator:
                 return
             lstr = f"Paginating epub3 file: {self.epub_file}"
             self.wrlog(True, lstr)
-            plstr = (
-                f'<nav epub:type="page-list" id="page-list" ' 'hidden="hidden"><ol>'
-            ) + CR
-            self.plist = plstr
+            self.plist = pg_xmlns
             self.rdict["converted"] = True
         else:
             lstr = "Conversion to epub3 failed. Conversion reported:"
@@ -764,8 +768,7 @@ class epub_paginator:
         """
 
         with self.rdict["nav_file"].open("r") as nav_file_read:
-            nav_datar = nav_file_read.read()
-            nav_data = self.chk_xmlns(nav_datar)
+            nav_data = nav_file_read.read()
         pagelist_loc = nav_data.find("</body>")
         new_nav_data = nav_data[:pagelist_loc]
         new_nav_data += self.plist
@@ -1418,23 +1421,44 @@ class epub_paginator:
         **Keyword arguments:**
         ebook_data - complete data from an xhtml file.
         """
-        # these are valid xmlns items, be sure we have one
-        if ebook_data.find("xmlns:epub") != -1:
-            return ebook_data
-        elif ebook_data.find("http://www.idpf.org/2007/ops") != -1:
-            return ebook_data
-        # otherwise, add it
+        # find the html element and grab it
+        l1 = ebook_data.find("<html")
+        if l1 == -1:
+            estr = f"Fatal Error: searching for xmlns, but did not find <html."
+            self.wrlog(True,estr)
+            self.rdict["error_lst"].append(estr)
+            self.rdict["pager_error"] = True
+            return
         else:
-            self.wrlog(False, f"Adding xmlns:epub namespace.")
-            loc = ebook_data.find("<html")
-            newbk = ebook_data[:loc]
-            ebook_data = ebook_data[loc:]
-            loc2 = ebook_data.find(">")
-            newbk += ebook_data[:loc2]
-            newbk += " "
-            newbk += epubns
-            newbk += ebook_data[loc2:]
-            return newbk
+            l2 = ebook_data[l1:].find(">")
+            if l2 == -1:
+                estr = f"Fatal Error: searching for xmlns, but did not find <html end."
+                self.wrlog(True,estr)
+                self.rdict["error_lst"].append(estr)
+                self.rdict["pager_error"] = True
+                return
+            else:
+                html_el = ebook_data[l1:l1+l2]
+                self.wrlog(False,f"<html element: {html_el}")
+                # these are valid xmlns items, be sure we have one
+                if html_el.find("xmlns:epub") != -1:
+                    self.wrlog(False,"xmlns was found.")
+                    return ebook_data
+                elif html_el.find("http://www.idpf.org/2007/ops") != -1:
+                    self.wrlog(False,"xmlns was found.")
+                    return ebook_data
+                # otherwise, add it
+                else:
+                    self.wrlog(False, f"Adding xmlns:epub namespace.")
+                    loc = ebook_data.find("<html")
+                    newbk = ebook_data[:loc]
+                    ebook_data = ebook_data[loc:]
+                    loc2 = ebook_data.find(">")
+                    newbk += ebook_data[:loc2]
+                    newbk += " "
+                    newbk += epubns
+                    newbk += ebook_data[loc2:]
+                    return newbk
 
     def scan_sections(self):
         """
@@ -2037,8 +2061,14 @@ class epub_paginator:
         # The epub name is the book file name with spaces removed and '.epub'
         # removed.
         if not Path(source_epub).is_file():
-            self.wrlog(False, "Fatal error: Source epub not found.")
+            self.wrlog(True, "Fatal error: Source epub not found.")
             self.rdict["error_lst"].append("Fatal error: Source epub not found.")
+            self.rdict["pager_error"] = True
+            return self.rdict
+
+        if not Path(self.outdir).is_dir:
+            self.wrlog(True,f"Fatal error: output directory does not exist: {self.outdir}")
+            self.rdict["error_lst"].append("Fatal error: output directory not found.")
             self.rdict["pager_error"] = True
             return self.rdict
 
@@ -2099,17 +2129,12 @@ class epub_paginator:
         epub_ver = self.get_epub_version(self.epub_file)
         self.wrlog(True, f"Original file is epub version {epub_ver}")
         if epub_ver[0] != "3":
-            if self.ebookconvert.casefold() != "none":
-                # convert either gives us an epub3 or a fatal error
+            if Path(self.ebookconvert).is_file():
                 self.convert_epub()
                 if self.rdict["pager_error"]:
                     return self.rdict
                 # we have an epub 3
-                self.plist = (
-                    f'<nav epub:type="page-list" '
-                    f'id="page-list" hidden="hidden"><ol>'
-                    "\n"
-                )
+                self.plist = pg_xmlns
             else:
                 lstr = (
                     "    --> WARNING <-- Epub version is not 3 or newer,"
@@ -2125,11 +2150,7 @@ class epub_paginator:
                 self.match = False
                 self.rdict["has_plist"] = False
         else:
-            self.plist = (
-                f'<nav epub:type="page-list" '
-                f'id="page-list" hidden="hidden"><ol>'
-                "\n"
-            )
+            self.plist = pg_xmlns
         # at this point, we should have a converted file, or an epub2 because no conversion.
         self.ePubUnZip(self.epub_file, self.rdict["unzip_path"])
         self.rdict[
