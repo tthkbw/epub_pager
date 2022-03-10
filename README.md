@@ -7,17 +7,16 @@ books.
 
 * For ePub3 files, epubpaginator can generate a page-list table in the
   navigation document, and corresponding page links in the epub text.
-* epubpaginator can generate "pagelines"--information lines in the text
-  of an ePub2 or ePub3 document. These are placed at the end of the
-  paragraph where the page break occurs and appear as separate
-  paragraphs in the book.
+* epubpaginator can generate "pagelines"--information lines in the text of an
+  ePub2 or ePub3 document. These are placed after the paragraph where the page
+  break occurs and are formatted as separate paragraphs in the book.
 * epubpaginator can generate page information notes formatted as
   superscripts in the text of an ePub2 or ePub3 document. These
   superscripts are placed after the word where the page break occurs.
 * If an ePub3 document has existing pagination, epubpaginator can match
   the pagelines or superscripts to the existing pagination. This allows
   you to see the publisher's page numbering in epub readers that do not
-  support epub3 page-list tables.
+  support epub3 page-list.
 * Font size, color and alignment (right, left, or center) are selectable
   for pagelines.
 * Font size and color are selectable for superscripts.
@@ -39,11 +38,11 @@ books.
 
 ## Usage
 
-epubpaginator is a command-line tool that can be configured with
-command line options, or by referencing a configuration file. The
-configuration file is in json format. Common problems include the specification
-of booleans (json uses 'true' and 'false') and paths (for paths, use '/' as the
-directory separator, not '\\' as expected on Windows).
+epubpaginator is a command-line tool that can be configured with command line
+options, or by referencing a configuration file. The configuration file is in
+json format. Common mistakes include the specification of booleans (json uses
+'true' and 'false' not True and False as Python does) and paths (for paths, use
+'/' as the directory separator, not '\\' as expected on Windows).
 
 Download the zip file from [Github](https://github.com/tthkbw/epub_pager) and
 unzip into a directory of your choice. From that directory, run:
@@ -154,12 +153,12 @@ where they can purchase the book. Maybe I'll get rich.
 
 Most epub readers display page numbers that are based on what fits on the
 display of your device given its size and the font size you have chosen. When
-you switch devices (say, from your iPhone to your iPad) or change the font
-size, the page size and total number of pages in your book changes. This means
-you can't use page numbers as bookmarks. It also means you don't have
-consistent page lengths, so you don't have a feel for how much is left in a
-chapter or in the book. Percentages don't help much. 20% of a book with 75,000
-words is quite different from 20% of a book with 200,000 words.
+you switch reading devices (say, from your iPhone to your iPad) or change the
+font size, the page size and total number of pages in your book changes. If you
+do these things, page numbers are not useful as bookmarks. Without consistent
+page lengths you don't have a feel for how much is left in a chapter or in the
+book. Percentages don't help much. 20% of a book with 75,000 words is quite
+different from 20% of a book with 200,000 words.
 
 Consistent paging can be useful to mitigate these issues. If an epub book
 contains paging information that matches the paging of a physical book, the
@@ -204,7 +203,8 @@ The 'superscript' option directs epubpaginator to place page information
 in the text of the book as a superscript placed after the word where the
 page break occurs. Superscripts contain the current page number of the book
 and optionally the total pages in the book. Chapter page and chapter
-totals can also be added.
+totals can also be added. Superscripts are more distracting when reading, but
+have the advantage of more closely locating the page break location.
 
 ## Examples
 
@@ -281,7 +281,7 @@ of the options 'pgwords' and 'pages' as follows:
    epubpaginator has no way to determine where to place pages.
 2. If 'pgwords' is not zero, its value is used to determine the page
    length for the paginated book.
-3. if 'pgwords' is zero and 'pages' is not zero, then 'pgwords' is set
+3. If 'pgwords' is zero and 'pages' is not zero, then 'pgwords' is set
    to the integer value of the book's word count divided by the value of
    pages. 'pgwords' is then used to determine the page length for the
    paginated book.
@@ -307,7 +307,8 @@ to point to a script for your system that runs epubcheck and requires only a
 filename as input. Set --chk_paged and --chk_orig as desired. Included in the
 zipfile is a unix script, epubcheck.sh, which runs the Homebrew version of
 epubcheck on a mac, and epubcheck.bat which is an example of a batch file to
-run epubcheck on Windows.
+run epubcheck on Windows. Modify these as required to point to your versions of
+epubcheck.
 
 #### epubcheck Comments
 
@@ -321,13 +322,13 @@ run epubcheck on Windows.
    multiple errors, often dozens or even hundreds of errors, and even more
    warnings. It is recommended to run external epubcheck with the `-e` option
    to report only errors, not warnings. The example scripts do this, and
-   epubpaginator does this when running the Python epubchek module.
+   epubpaginator does this when running the Python epubcheck module.
    epubpaginator simply reports these errors and whether there was a difference
    in the number of warnings, errors, or fatal errors between the check of the
    original book and the paginated book. 
 4. Fortunately, most epub readers are very forgiving of warnings, errors
    and fatal errors reported by epubcheck. While it is common for
-   epubcheck to report errors and even fatal errors, it is relatively
+   epubcheck to report errors or even fatal errors, it is relatively
    uncommon for epub readers to improperly render the epub book. 
 5. The most common errors that occur in epubpaginator formatted books
    that are not present in the original book have to do with pagelines
@@ -341,7 +342,8 @@ run epubcheck on Windows.
 converter program, ebook-convert, which epubpaginator can use to
 convert epub2 books to epub3 books to allow page-list generation. If the
 option "ebookconvert" contains the path to ebook-convert, epub2 books
-will be converted to epub3 and the epub3 book will be paginated.
+will be converted to epub3 and the epub3 book can be paginated with a page-list
+and page links.
 
 The use of Calibre ebook-converter for epub2 books is encouraged because
 the converted books are more consistent in structure than the originals.

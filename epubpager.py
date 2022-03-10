@@ -40,6 +40,14 @@ class epub_paginator:
 
     **Release Notes**
 
+    **Version 3.2**
+    1. Added capability of not setting genplist, pageline or superscript and
+    epubpager will just convert, count words and count pages.
+    1. Refined how pagelinks and lines were inserted to be sure proper page
+    location worked. I think it did, but minor change made and operation
+    verified.
+    1. Generate an error if the original file removal fails.
+
     **Version 3.1**
     Finding bugs in 3.0
     1. using the shell script to simplify cross-platform compatibility causes
@@ -261,7 +269,7 @@ class epub_paginator:
     1. Adds chapter page numbering.# }}}
     """
 
-    version = "2.99"
+    version = "3.2"
     curpg = 1  # current page number
     tot_wcnt = 0  # count of total words in the book
     pg_wcnt = 0  # word count per page
@@ -1621,13 +1629,16 @@ class epub_paginator:
                 # the <p>
                 loc = ebook_data.find("<")
                 wdcnt = len(ebook_data[:loc].split())
+                # new need calculation
+                need = self.pgwords - self.pg_wcnt
                 self.pg_wcnt += wdcnt
-                if self.pg_wcnt > self.pgwords:
-                    need = self.pg_wcnt - self.pgwords
-                    self.wrlog(
-                        False,
-                        (f"Page boundary. pg_wcnt: " f"{self.pg_wcnt}. need: {need}"),
-                    )
+                
+                if self.pg_wcnt >= self.pgwords:
+                    # self.wrlog(False, f"need {need} words and we crossed page {self.curpg} with {wdcnt} words added.")
+                    # self.wrlog(
+                    #     False,
+                    #     (f"Pageline {self.curpg} covers {self.pg_wcnt} words."),
+                    # )
                     # build and stage a pageline because we are at a page
                     # boundary
                     if self.pageline:
@@ -1658,7 +1669,7 @@ class epub_paginator:
                         ebook_data = ebook_data[loc:]
                     else:
                         # now count words and put in pgbook until we get to
-                        # our position
+                        # our next page locaton--this is need words.
                         lidx = 0
                         words = 0
                         while lidx < loc:
@@ -1666,8 +1677,8 @@ class epub_paginator:
                             if ebook_data[lidx] == " ":
                                 words += 1
                             if words == need:
-                                estr = f"Insert plist. lidx: {lidx}"
-                                self.wrlog(False, estr)
+                                # estr = f"Insert page link at {self.pg_wcnt - wdcnt + words}"
+                                # self.wrlog(False, estr)
                                 if self.genplist:
                                     pstr = (
                                         f'<span epub:type="pagebreak" '
@@ -1693,6 +1704,7 @@ class epub_paginator:
                     sct_pg += 1
                     self.curpg += 1
                     self.pg_wcnt = self.pg_wcnt - self.pgwords
+                    # self.wrlog(False, f"Page {self.curpg} starts with {self.pg_wcnt} words.")
                 else:
                     pgbook += ebook_data[:loc]
                     ebook_data = ebook_data[loc:]
@@ -1804,10 +1816,11 @@ class epub_paginator:
                     loc = ebook_data.find("</p>")
                     if loc == -1:
                         lstr = (
-                            "Warning: Did not find paragraph end to "
-                            "insert matched pageline."
+                            f"Warning: {chapter['disk_file']}: Did not find </p> for"
+                            f" matched pageline."
                         )
                         self.wrlog(False, lstr)
+                        self.rdict["warn_lst"].append(lstr)
                         lstr = f"--> thispage: {thispage}; " f"sct_pg: {sct_pg}"
                         self.wrlog(False, lstr)
                         self.rdict["warn_lst"].append(lstr)
@@ -2209,126 +2222,139 @@ class epub_paginator:
                     ),
                 )
         else:
-            if self.pageline:
-                self.wrlog(
-                    True,
-                    (
-                        f"Generating page pageline with "
-                        f"{self.rdict['pgwords']} words per page."
-                    ),
-                )
-            if self.superscript:
-                self.wrlog(
-                    True,
-                    (
-                        f"Generating page superscripts with "
-                        f"{self.rdict['pgwords']} words per page."
-                    ),
-                )
-        # this is the working loop. Scan each file, locate pages and insert
-        # page-links and/or pagelines or superscripts
-        self.curpg = 1
-        self.wrlog(False, "Begin pagination, scanning spine.")
-        for chapter in self.rdict["spine_lst"]:
-            if self.DEBUG:
-                lstr = f"file: {chapter['disk_file']}"
-                self.wrlog(False, lstr)
-            # this stupid fix is required by Hunter's Moon which puts '&amp;' in file names.
-            pstr = f"{chapter['disk_file']}"
-            pstr = pstr.replace(r"amp;", "")
-            erfile = Path(pstr)
-            ebook_data = erfile.read_text(encoding="utf-8")
-            # with erfile.open("r") as ebook_rfile:
-            #     ebook_data = ebook_rfile.read()
-            # ewfile = Path(f"{chapter['disk_file']}")
-            ewfile = Path(pstr)
-            # with ewfile.open("w") as ebook_wfile:
-            start_total = self.tot_wcnt
-            lstr = f"Scanning {chapter['disk_file']}"
-            self.wrlog(False, lstr)
-            if self.rdict["match"]:
-                if self.DEBUG:
-                    lstr = f"file: " f"{chapter['disk_file']}"
-                    self.wrlog(False, lstr)
-                new_ebook = self.scan_match_file(ebook_data, chapter)
+            if not self.pageline and not self.superscript:
+                self.wrlog(True,f"No pagination was selected.")
+                self.wrlog(True,f"Pages: {self.rdict['pages']}")
+                self.wrlog(True,f"Words: {self.rdict['words']:,d}")
             else:
-                new_ebook = self.scan_file(ebook_data, chapter)
-            xebook_data = self.chk_xmlns(new_ebook)
+                if self.pageline:
+                    self.wrlog(
+                        True,
+                        (
+                            f"Generating page pageline with "
+                            f"{self.rdict['pgwords']} words per page."
+                        ),
+                    )
+                if self.superscript:
+                    self.wrlog(
+                        True,
+                        (
+                            f"Generating page superscripts with "
+                            f"{self.rdict['pgwords']} words per page."
+                        ),
+                    )
+        if self.genplist or self.pageline or self.superscript:
+            # this is the working loop. Scan each file, locate pages and insert
+            # page-links and/or pagelines or superscripts
+            self.curpg = 1
+            self.wrlog(False, "Begin pagination, scanning spine.")
+            for chapter in self.rdict["spine_lst"]:
+                if self.DEBUG:
+                    lstr = f"file: {chapter['disk_file']}"
+                    self.wrlog(False, lstr)
+                # this stupid fix is required by Hunter's Moon which puts '&amp;' in file names.
+                pstr = f"{chapter['disk_file']}"
+                pstr = pstr.replace(r"amp;", "")
+                erfile = Path(pstr)
+                ebook_data = erfile.read_text(encoding="utf-8")
+                # with erfile.open("r") as ebook_rfile:
+                #     ebook_data = ebook_rfile.read()
+                # ewfile = Path(f"{chapter['disk_file']}")
+                ewfile = Path(pstr)
+                # with ewfile.open("w") as ebook_wfile:
+                start_total = self.tot_wcnt
+                lstr = f"Scanning {chapter['disk_file']}"
+                self.wrlog(False, lstr)
+                if self.rdict["match"]:
+                    if self.DEBUG:
+                        lstr = f"file: " f"{chapter['disk_file']}"
+                        self.wrlog(False, lstr)
+                    new_ebook = self.scan_match_file(ebook_data, chapter)
+                else:
+                    new_ebook = self.scan_file(ebook_data, chapter)
+                xebook_data = self.chk_xmlns(new_ebook)
+                if self.rdict["pager_error"]:
+                    return self.rdict
+                # ebook_wfile.write(xebook_data)
+                ewfile.write_text(xebook_data, "utf-8")
             if self.rdict["pager_error"]:
                 return self.rdict
-            # ebook_wfile.write(xebook_data)
-            ewfile.write_text(xebook_data, "utf-8")
-        if self.rdict["pager_error"]:
-            return self.rdict
-        if self.rdict["match"]:
-            w_per_page = self.rdict["words"] / self.rdict["pages"]
-            lstr = (
-                f"    {self.rdict['words']:,} words; "
-                f"    {self.rdict['pages']:,} pages; "
-                f"    {int(w_per_page)} words per page"
+            if self.rdict["match"]:
+                w_per_page = self.rdict["words"] / self.rdict["pages"]
+                lstr = (
+                    f"    {self.rdict['words']:,} words; "
+                    f"    {self.rdict['pages']:,} pages; "
+                    f"    {int(w_per_page)} words per page"
+                )
+                self.wrlog(False, lstr)
+            else:
+                self.wrlog(
+                    True,
+                    (
+                        f"    {self.rdict['words']:,} words;"
+                        f"    {self.rdict['pages']:,} pages"
+                    ),
+                )
+            # modify the nav_file to add the pagelist
+            if self.genplist:
+                self.plist += "  </ol></nav>" + CR
+                self.update_navfile()
+            # build the epub file
+            # self.wrlog(
+            #     True,
+            #     f"ready to zip: {self.rdict['bk_outfile']}, with {self.rdict['unzip_path']}",
+            # )
+            self.ePubZip(
+                self.rdict["bk_outfile"],
+                self.rdict["unzip_path"],
+                self.bk_flist,
             )
-            self.wrlog(False, lstr)
-        else:
+            t2pagination = time.perf_counter()
+            if self.chk_paged:
+                self.run_chk(False)
+            self.wrlog(True, f"The paged epub is at: {self.rdict['bk_outfile']}" + CR)
+            self.rdict["paginate_time"] = (
+                (t2pagination - t1pagination)
+                - self.rdict["epubchkorig_time"]
+                - self.rdict["convert_time"]
+            )
+            ttime = (
+                self.rdict["paginate_time"]
+                + self.rdict["epubchkorig_time"]
+                + self.rdict["convert_time"]
+                + self.rdict["epubchkpage_time"]
+            )
+            self.wrlog(True, f"Total processing time was {ttime:.2f} seconds")
+            if self.rdict["converted"]:
+                self.wrlog(
+                    True,
+                    f"    epub conversion took {self.rdict['convert_time']:.2f} seconds.",
+                )
+            if self.rdict["epubchkorig_time"] > 0:
+                self.wrlog(
+                    True,
+                    f"    epubcheck original took {self.rdict['epubchkorig_time']:.2f} seconds.",
+                )
+            if self.rdict["epubchkpage_time"] > 0:
+                self.wrlog(
+                    True,
+                    f"    epubcheck paged took {self.rdict['epubchkpage_time']:.2f} seconds.",
+                )
             self.wrlog(
                 True,
-                (
-                    f"    {self.rdict['words']:,} words;"
-                    f"    {self.rdict['pages']:,} pages"
-                ),
-            )
-        # modify the nav_file to add the pagelist
-        if self.genplist:
-            self.plist += "  </ol></nav>" + CR
-            self.update_navfile()
-        # build the epub file
-        # self.wrlog(
-        #     True,
-        #     f"ready to zip: {self.rdict['bk_outfile']}, with {self.rdict['unzip_path']}",
-        # )
-        self.ePubZip(
-            self.rdict["bk_outfile"],
-            self.rdict["unzip_path"],
-            self.bk_flist,
-        )
+                f"    Pagination took {self.rdict['paginate_time']:.2f} seconds.",
+            )  # end of pagination, only done if requested.
+        else:
+            self.wrlog(True, f"No pagination was selected.")
         # and if DEBUG is not set, we remove the unzipped epub directory
         if not self.DEBUG:
             shutil.rmtree(self.rdict["unzip_path"], ignore_errors=True)
-            Path.unlink(Path(self.epub_file))
-        t2pagination = time.perf_counter()
-        if self.chk_paged:
-            self.run_chk(False)
-        self.wrlog(True, f"The paged epub is at: {self.rdict['bk_outfile']}" + CR)
-        self.rdict["paginate_time"] = (
-            (t2pagination - t1pagination)
-            - self.rdict["epubchkorig_time"]
-            - self.rdict["convert_time"]
-        )
-        ttime = (
-            self.rdict["paginate_time"]
-            + self.rdict["epubchkorig_time"]
-            + self.rdict["convert_time"]
-            + self.rdict["epubchkpage_time"]
-        )
-        self.wrlog(True, f"Total processing time was {ttime:.2f} seconds")
-        if self.rdict["converted"]:
-            self.wrlog(
-                True,
-                f"    epub conversion took {self.rdict['convert_time']:.2f} seconds.",
-            )
-        if self.rdict["epubchkorig_time"] > 0:
-            self.wrlog(
-                True,
-                f"    epubcheck original took {self.rdict['epubchkorig_time']:.2f} seconds.",
-            )
-        if self.rdict["epubchkpage_time"] > 0:
-            self.wrlog(
-                True,
-                f"    epubcheck paged took {self.rdict['epubchkpage_time']:.2f} seconds.",
-            )
-        self.wrlog(
-            True,
-            f"    Pagination took {self.rdict['paginate_time']:.2f} seconds.",
-        )
+            try:
+                Path(self.epub_file).unlink(False)
+            except FileNotFoundError:
+                estr = f"FileNotFoundError in unlinking {Path(self.epub_file)}"
+                self.rdict["error_lst"].append(estr)
+                self.wrlog(True, estr)
         self.wrlog(False, "Dumping rdict")
         for key in self.rdict.keys():
             if key != "manifest" and key != "spine_lst":

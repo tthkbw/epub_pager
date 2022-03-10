@@ -257,6 +257,9 @@ def main():
     #     print(f" --> This is an ePub 2 book.")
     # if return_dict["converted"]:
     #     print(f" --> This epub book was converted to epub3.")
+    echk_err = False
+    pager_err = False
+    pager_warn = False
     if return_dict["pager_error"]:
         pager_err = True
         # print()
@@ -272,9 +275,6 @@ def main():
                 print(f"   --> {e}")
             print(f"See details in log: {return_dict['logfile']}")
 
-    echk_err = False
-    pager_err = False
-    pager_warn = False
     if return_dict["pager_warn"]:
         pager_warn = True
         print("  --> There were warnings in epub_pager.")
