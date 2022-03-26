@@ -30,7 +30,8 @@ books.
 ## Requirements
 
 1. Python 3.7 or greater. 
-2. Optional [epubcheck module](https://pypi.org/project/epubcheck/)--see below
+2. Optional [epubcheck module](https://pypi.org/project/epubcheck/)--see below.
+3. Optional Calibre ebook-convert--see below.
 
 ## Installation
 
