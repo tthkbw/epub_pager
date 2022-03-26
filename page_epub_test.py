@@ -14,6 +14,8 @@ BookFileName = Path("/Users/tbrown/Documents/projects/BookTally/Books.json")
 BookArray = []  # the entire set of dictionaries from the master file
 booklist = []  # the list of titles in the BookArray
 CR = "\n"
+web_path = "/Volumes/T7Data"
+calibre_path = "/Volumes/T7Data"
 
 
 def build_booklist(bookarray):
@@ -85,7 +87,7 @@ def p_result(llen, lpad, s):
 parser = argparse.ArgumentParser(
     description=(f"Paginate Calibre ePub " f"files.")
 )
-parser.add_argument("--cfg", default="", help="path to configuration file")
+parser.add_argument("--cfg", default="epubpager.cfg", help="path to configuration file")
 parser.add_argument(
     "-c", "--count", type=int, default=5, help="count of books to paginate"
 )
@@ -149,97 +151,85 @@ for book in BookArray:
     b_edb["orig_error"] = 0
     b_edb["echk_fatal"] = 0
     b_edb["echk_error"] = 0
-    format_list = book["formats"]
-    for booktype in format_list:
-        booksplit = booktype.split("/")
-        filename = booksplit[len(booksplit) - 1]
-        ext = filename.split(".")
-
-        if ext[len(ext) - 1] == "epub":
-            if not args.quiet:
-                print("\n--------------------")
-            if not args.quiet:
-                print(f"Paginating {book['Title']:.72}")
-                # print(f"pageline: {paginator.pageline}; super: {paginator.superscript}")
-                # print(f"genplist: {paginator.genplist}; match: {paginator.match}")
-            else:
-                if not epub_count % 5:
-                    print(f"Book {epub_count}; ")
-            paginator = epub_paginator()
-            set_params(paginator)
-            rdict = paginator.paginate_epub(booktype)
-            # report the results
-            b_edb["pager_error"] = rdict["pager_error"]
-            b_edb["pager_warn"] = rdict["pager_warn"]
-            b_edb["echk_fatal"] = rdict["echk_fatal"]
-            b_edb["echk_error"] = rdict["echk_error"]
-            b_edb["orig_fatal"] = rdict["orig_fatal"]
-            b_edb["orig_error"] = rdict["orig_error"]
-            b_edb["converted"] = rdict["converted"]
-            b_edb["version"] = rdict["epub_version"]
-            one_fatal = False
-            one_error = False
-            one_warn = False
-            print(f"epub version {b_edb['version']}")
-            if b_edb["converted"]:
-                cvrt += 1
-                print(f"This book was converted to epub3")
-            if b_edb["pager_fatal"]:
-                one_fatal = True
-                pager_fatal_errcnt += 1
-                print(
-                    f"--> Pager Fatal errors occurred in book {booktype:.50}; book"
-                    f" number:{epub_count}:"
-                )
-            if b_edb["pager_error"]:
-                one_error = True
-                pager_error_errcnt += 1
-                print(
-                    f"--> Pager Errors occurred in book {booktype:.50}; book"
-                    f" number:{epub_count}:"
-                )
-            if b_edb["pager_warn"]:
-                one_warn = True
-                pager_warn_errcnt += 1
-                print(
-                    f"--> Pager Warnings occurred in book {booktype:.50}; book"
-                    f" number:{epub_count}:"
-                )
-            if b_edb["echk_fatal"]:
-                one_fatal = True
-                echk_fatal_errcnt += 1
-                print(
-                    f"--> echk Fatal errors occurred in book {booktype:.50}; book"
-                    f" number:{epub_count}:"
-                )
-            if b_edb["echk_error"]:
-                one_error = True
-                echk_error_errcnt += 1
-                print(
-                    f"--> echk Errors occurred in book {booktype:.50}; book"
-                    f" number:{epub_count}:"
-                )
-            if b_edb["orig_fatal"]:
-                one_fatal = True
-                orig_fatal_errcnt += 1
-                print(
-                    f"--> orig Fatal errors occurred in book {booktype:.50}; book"
-                    f" number:{epub_count}:"
-                )
-            if b_edb["orig_error"]:
-                one_error = True
-                orig_error_errcnt += 1
-                print(
-                    f"--> orig Errors occurred in book {booktype:.50}; book"
-                    f" number:{epub_count}:"
-                )
-            if one_fatal or one_error or one_warn:
-                print("Errors or warnings detected.")
-            else:
-                print("No errors or warnings detected.")
-            epub_count += 1
-            edb_list.append(b_edb)
-            t2 = time.perf_counter()
+    if len(book["formats"]):
+        for f in book["formats"]:
+            if Path(f).suffix == ".epub" and "Calibre" in f:
+                rf = f"{calibre_path}/{f}"
+                print(f"Paginating {book['Title']:.72} at {rf}")
+                paginator = epub_paginator()
+                set_params(paginator)
+                rdict = paginator.paginate_epub(rf)
+                # report the results
+                b_edb["pager_error"] = rdict["pager_error"]
+                b_edb["pager_warn"] = rdict["pager_warn"]
+                b_edb["echk_fatal"] = rdict["echk_fatal"]
+                b_edb["echk_error"] = rdict["echk_error"]
+                b_edb["orig_fatal"] = rdict["orig_fatal"]
+                b_edb["orig_error"] = rdict["orig_error"]
+                b_edb["converted"] = rdict["converted"]
+                b_edb["version"] = rdict["epub_version"]
+                one_fatal = False
+                one_error = False
+                one_warn = False
+                print(f"epub version {b_edb['version']}")
+                if b_edb["converted"]:
+                    cvrt += 1
+                    print(f"This book was converted to epub3")
+                if b_edb["pager_fatal"]:
+                    one_fatal = True
+                    pager_fatal_errcnt += 1
+                    print(
+                        f"--> Pager Fatal errors occurred in book {rf:.50}; book"
+                        f" number:{epub_count}:"
+                    )
+                if b_edb["pager_error"]:
+                    one_error = True
+                    pager_error_errcnt += 1
+                    print(
+                        f"--> Pager Errors occurred in book {rf:.50}; book"
+                        f" number:{epub_count}:"
+                    )
+                if b_edb["pager_warn"]:
+                    one_warn = True
+                    pager_warn_errcnt += 1
+                    print(
+                        f"--> Pager Warnings occurred in book {rf:.50}; book"
+                        f" number:{epub_count}:"
+                    )
+                if b_edb["echk_fatal"]:
+                    one_fatal = True
+                    echk_fatal_errcnt += 1
+                    print(
+                        f"--> echk Fatal errors occurred in book {rf:.50}; book"
+                        f" number:{epub_count}:"
+                    )
+                if b_edb["echk_error"]:
+                    one_error = True
+                    echk_error_errcnt += 1
+                    print(
+                        f"--> echk Errors occurred in book {rf:.50}; book"
+                        f" number:{epub_count}:"
+                    )
+                if b_edb["orig_fatal"]:
+                    one_fatal = True
+                    orig_fatal_errcnt += 1
+                    print(
+                        f"--> orig Fatal errors occurred in book {rf:.50}; book"
+                        f" number:{epub_count}:"
+                    )
+                if b_edb["orig_error"]:
+                    one_error = True
+                    orig_error_errcnt += 1
+                    print(
+                        f"--> orig Errors occurred in book {rf:.50}; book"
+                        f" number:{epub_count}:"
+                    )
+                if one_fatal or one_error or one_warn:
+                    print("Errors or warnings detected.")
+                else:
+                    print("No errors or warnings detected.")
+                epub_count += 1
+                edb_list.append(b_edb)
 print()
 print(f"Completed {args.count} paginations: ")
 print("--------------------")

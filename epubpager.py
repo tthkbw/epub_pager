@@ -40,6 +40,8 @@ class epub_paginator:
 
     **Release Notes**
 
+    **Version 3.3**
+    1. prepare for release on GitHub.
     **Version 3.2**
     1. Added capability of not setting genplist, pageline or superscript and
     epubpager will just convert, count words and count pages.
@@ -269,7 +271,7 @@ class epub_paginator:
     1. Adds chapter page numbering.# }}}
     """
 
-    version = "3.2"
+    version = "3.3"
     curpg = 1  # current page number
     tot_wcnt = 0  # count of total words in the book
     pg_wcnt = 0  # word count per page
