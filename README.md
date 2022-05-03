@@ -1,7 +1,8 @@
 # epubpaginator
 
 epubpaginator is a Python script that generates pagination for ePub
-books. 
+books. epubpaginator makes a copy of the input epub file and modifies that copy
+to contain pagination information.
 
 ## Features
 
@@ -286,6 +287,12 @@ of the options 'pgwords' and 'pages' as follows:
    to the integer value of the book's word count divided by the value of
    pages. 'pgwords' is then used to determine the page length for the
    paginated book.
+
+### Benign Failures
+
+If you are using epubpager only to generate an epub3 pagelist (you have not
+selected 'pageline' or 'superscript'), and an epub3 file already contains a
+pagelist, epubpager will report there is nothing to do and quit.
 
 ### epubcheck Usage
 

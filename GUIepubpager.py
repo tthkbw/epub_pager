@@ -12,6 +12,7 @@ import io
 import copy
 
 import PySimpleGUI as sg
+import threading
 import json
 import base64
 import textwrap
@@ -26,14 +27,23 @@ from PIL import Image
 # from packages.pst import PrettySimpleTable
 from epubpager import epub_paginator
 
-Version = "0.1"
+Version = "0.3"
 
 """
 GUIepubpager.py based on CalibrePaginator.py
-TODO
+Version = "0.3"
+
+Version = "0.2"
 1. Add epub version to metadata from the epub and display.
-2. Determine if file is already paginated by epubpager (requires enhancement to epubpager).
-3. Add ability to paginate all books in the list. Select fiFind les becomes the means to paginate selected books. 
+2. Determine if file is already paginated by epubpager (requires enhancement to
+   epubpager).
+3. Add ability to paginate all books in the list. Select Find files becomes the
+   means to paginate selected books. 
+4. Hide the epubpage metadata if there is none in the epub file.
+5. Implemented a method to perform_long_operation method of running pagination
+in a thread and allowing canceling of a long list at any point.
+
+TODO
 
 Version = '0.1'
 Basics work:
@@ -59,6 +69,7 @@ Basics work:
 "identifiers":
 "pubdate":
 "publisher":
+"
 
 
 """
@@ -66,16 +77,15 @@ Basics work:
 CR = "\n"
 INDENT = "  "
 BREAK = "-------------------" + CR
-MainWindowSize = (1024, 880)
+MainWindowSize = (1024, 920)
 termcolumns = 148
 termrows = 20
 help_length = termrows + 5
 output_width = 80
-output_height = 30
+output_height = 32
 debug_width = 56
 bookdata_textwidth = 24
 booklist_width = 68
-output_height = 30
 indent = 3
 wrap_width = output_width - 8
 recent_table_length = 28  # how many lines in each section of recent books table
@@ -126,6 +136,9 @@ findlist = []  # books found from the 'find' button
 cb_cover = ""
 nocover = "./NoBookCover.png"
 findlist_active = False
+cancel_pagination = False
+paginate_list = []
+paginate_count = 0
 
 config = {
     "srcdir": "/Users/tbrown/data_store/epubs",
@@ -198,7 +211,7 @@ lprint = mprint
 
 
 def LogWarning(message):
-    window["-DEBUG-" + sg.WRITE_ONLY_KEY].print(message, font="Menlo 14 bold", t="red")
+    window["-DEBUG-" + sg.WRITE_ONLY_KEY].print(message, font="Menlo 12 bold", t="red")
 
 
 def LogEvent(message):
@@ -240,8 +253,8 @@ def update_config(values):
     config["outdir"] = values["-outdir-"]
     config["match"] = values["-match-"]
     config["genplist"] = values["-genplist-"]
-    config["pgwords"] = values["-pgwords-"]
-    config["pages"] = values["-pages-"]
+    config["pgwords"] = int(values["-pgwords-"])
+    config["pages"] = int(values["-pages-"])
     config["pageline"] = values["-pageline-"]
     if values["-align_left-"]:
         config["pl_align"] = "left"
@@ -514,7 +527,7 @@ def render_markdown(lprint, source):  # {{{
         if codeblock:
             lprint(line, font=code)
             continue
-        # now scan the line by character and add styles as appropriate
+        # now scan the line by character and add character styles as appropriate
         renderline = ""
         current_style = stylelist[0][0]
         j = 0
@@ -526,7 +539,7 @@ def render_markdown(lprint, source):  # {{{
                 continue
             char = line[i]
             # handle escaping character styles
-            # skip the escape char and mark to ignor style
+            # skip the escape char and mark to ignore style
             if char == '\\':
                 nocharstyle = True
                 continue
@@ -551,9 +564,13 @@ def render_markdown(lprint, source):  # {{{
                 renderline += char
                 j += 1
         start = 0
+        # print(f"Before printing: {stylelist}")
+        # print(f"renderline: {renderline}")
         if len(stylelist) == 1:
             style = stylelist[0][0]
             lprint(renderline, font=style, t="black")
+            # In this case, we reset the stylelist for the next line, it's all used up.
+            stylelist = []
         else:
             bound = len(stylelist)
             for i in range(1, len(stylelist)):
@@ -598,13 +615,13 @@ def place_value(number):  # {{{
 def update_view(current_book):  # {{{
     present_book()
     load_cover(current_book)
-    update_BookDataFrame(current_book)
+    update_BookDataFrame()
 
 
 # }}}
 
 
-def create_bookname(title, author):
+def create_bookname(title, author):# {{{
     """
     Create a book name of the form title-author. Remove odd characters for
     file system simplicity.
@@ -614,24 +631,24 @@ def create_bookname(title, author):
         author = author.replace(c, "-")
     title = title.replace(" ", "_")
     author = author.replace(" ", "_")
-    return f"{title}-{author}"
+    return f"{title}-{author}"# }}}
 
 
-def print_dict(idict):
+def print_dict(idict):# {{{
     print("{")
     for key in idict.keys():
         print(f'''  "{key}": {idict[key]}"''')
-    print("}")
+    print("}")# }}}
 
 
-def show_dict(idict):
+def show_dict(idict):# {{{
     LogEvent("{")
     for key in idict.keys():
         LogEvent(f'''  "{key}": {idict[key]}"''')
-    LogEvent("}")
+    LogEvent("}")# }}}
 
 
-def read_opf(epub_file):
+def read_opf(epub_file):# {{{
     "Read the opf file data from the epub zipfile and return the opf_path and opf_data."
 
     opf_data = "No opf data"
@@ -681,10 +698,10 @@ def read_opf(epub_file):
             ) as o:
                 opf_data = o.read()
                 # opf_data = str(opf_b)
-            return (opf_path, opf_data)
+            return (opf_path, opf_data)# }}}
 
 
-def get_cover(epubfile, coverpath, bname, opf_path, opf_data):
+def get_cover(epubfile, coverpath, bname, opf_path, opf_data):# {{{
     "Get the cover file from epubfile and return it as coverpath/ename.jpg in path coverpath."
     """ 
     TODO
@@ -749,9 +766,21 @@ def get_cover(epubfile, coverpath, bname, opf_path, opf_data):
                 return "nocover"
         else:
             LogWarning("get_cover Error: Did not find href")
-            return "nocover"
+            return "nocover"# }}}
 
-def fetch_tlb(opf_data):
+def get_metaprop(opf_data, loc):
+    '''
+    given opf_data and location of a dc:item, find the value of the iterm
+    form of xml lines:
+    <meta property="dcterms:modified">2021-11-12T15:12:06Z</meta>
+    Location is pinting to the property location, so we find '>' and then '<'
+    then return the information between the two.
+    '''
+    loc1 = opf_data[loc:].find(">")
+    loce= opf_data[loc + loc1 :].find("<")
+    return (opf_data[loc + loc1 + 1 : loc + loc1 + loce])
+
+def fetch_tlb(opf_data):# {{{
     """
     parse opf file and grab data from:
         dc:title
@@ -763,13 +792,15 @@ def fetch_tlb(opf_data):
     rdict = {}
     rdict["title"] = "none"
     rdict["author"] = "none"
+    rdict["epub_version"] = 0
     rdict["pubdate"] = "none"
+    rdict["publisher"] = "none"
     rdict["blurb"] = "none"
     rdict["cover"] = "none"
     rdict["identifiers"] = []
     rdict["pages"] = 0
     rdict["words"] = 0
-    rdict["epub_version"] = 0
+    rdict["modified"] = False
 
     # get the epub version 
     # find the <package element
@@ -792,6 +823,7 @@ def fetch_tlb(opf_data):
             vlist = opf_str[vloc : vloc + 15].split('"')
             rdict['epub_version'] = vlist[1]
 
+    # title
     lt = opf_data.find("dcterms:title")
     if lt == -1:
         # print("Looking for dc:title")
@@ -800,6 +832,10 @@ def fetch_tlb(opf_data):
         if lt == -1:
             print("Error: Title meta data not found in opf file.")
             return rdict
+    if lt != -1:
+        rdict['title'] = get_metaprop(opf_data, lt)
+
+    # author
     lc = opf_data.find("<dcterms:creator")
     if lc == -1:
         # print("Looking for dc:creator")
@@ -808,9 +844,53 @@ def fetch_tlb(opf_data):
         if lc == -1:
             LogWarning("Error: Author meta data not found in opf file.")
             return rdict
+    if lc != -1:
+        rdict['author'] = get_metaprop(opf_data, lc)
+        # check to see if the creator name is of the form "last, first", and if so fix it.
+        if "," in rdict["author"]:
+            rdict["author"] = rdict["author"].replace(",", "")
+            asplit = rdict["author"].split()
+            au = ""
+            for item in asplit[1:]:
+                au += item + " "
+            au += asplit[0]
+            rdict["author"] = au
+
+    hprint("-----")
+    hprint(f"Fetch metadata from {rdict['title']} by {rdict['author']}")
+
+    # pubdate
     ld = opf_data.find("dcterms:modified")
     if ld == -1:
         ld = opf_data.find("<dc:date")
+        if ld == -1:
+            LogWarning("Publication date not found in opf file.")
+    if ld != -1:
+        rdict['pubdate'] = get_metaprop(opf_data, ld)
+        if rdict["pubdate"] != "none":
+            pd = rdict["pubdate"]
+            pds = pd.split("-")
+            year = pds[0]
+            if len(pds) > 1:
+                if int(pds[1]) > 0 and int(pds[1]) < 13:
+                    month = month_str[int(pds[1]) - 1]
+                else:
+                    print("month was not found.")
+                    month = "Jan"
+            else:
+                month = "Jan"
+            rdict["pubdate"] = f"{month} {year}"
+
+    # publisher
+    lp = opf_data.find("dcterms:publisher")
+    if lp == -1:
+        lp = opf_data.find("<dc:publisher")
+        if lp == -1:
+            LogWarning("Warning: publisher meta data not found in opf file.")
+    if lp != -1:
+        rdict['publisher'] = get_metaprop(opf_data, lp)
+
+    # Blurb
     lb = opf_data.find("dcterms:description")
     if lb == -1:
         lb = opf_data.find("<dc:description")
@@ -818,67 +898,36 @@ def fetch_tlb(opf_data):
             lb = opf_data.find("<description")
             if lb == -1:
                 LogWarning("Warning: Blurb meta data not found in opf file.")
+    if lb != -1:
+        rdict['blurb'] = get_metaprop(opf_data, lb)
+
+    # identifiers 
     li = opf_data.find("dcterms:identifier")
     if li == -1:
         li = opf_data.find("<dc:identifier")
-    # title
-    # print(f"title1: {opf_data[lt:lt+100]}")
-    lt1 = opf_data[lt:].find(">")
-    lte = opf_data[lt + lt1 :].find("<")
-    # print(f"title2: {opf_data[lt+lt1+1:lt+lt1+lte]}")
-    rdict["title"] = opf_data[lt + lt1 + 1 : lt + lt1 + lte]
-    # author
-    # print(f"author1: {opf_data[lc:lc+100]}")
-    lc1 = opf_data[lc:].find(">")
-    lce = opf_data[lc + lc1 :].find("</dc:creator>")
-    # print(f"author2: {opf_data[lc+lc1+1:lc+lc1+100]}")
-    rdict["author"] = opf_data[lc + lc1 + 1 : lc + lc1 + lce]
-    # check to see if the creator name is of the form "last, first", and if so fix it.
-    if "," in rdict["author"]:
-        rdict["author"] = rdict["author"].replace(",", "")
-        asplit = rdict["author"].split()
-        au = ""
-        for item in asplit[1:]:
-            au += item + " "
-        au += asplit[0]
-        rdict["author"] = au
-    # pubdate
-    if ld != -1:
-        # print(f"pubdate1: {opf_data[ld:ld+50]}")
-        ld1 = opf_data[ld:].find(">")
-        lde = opf_data[ld + ld1 :].find("<")
-        # print(f"pubdate2: {opf_data[ld+ld1+1:ld+ld1+20]}")
-        rdict["pubdate"] = opf_data[ld + ld1 + 1 : ld + ld1 + lde]
-    if rdict["pubdate"] != "none":
-        pd = rdict["pubdate"]
-        pds = pd.split("-")
-        year = pds[0]
-        if len(pds) > 1:
-            if int(pds[1]) > 0 and int(pds[1]) < 13:
-                month = month_str[int(pds[1]) - 1]
-            else:
-                print("month was not found.")
-                month = "Jan"
-        else:
-            month = "Jan"
-        rdict["pubdate"] = f"{month} {year}"
-    # comments
-    if lb != -1:
-        lb1 = opf_data[lb:].find(">")
-        lbe = opf_data[lb + lb1 :].find("<")
-        rdict["blurb"] = opf_data[lb + lb1 + 1 : lb + lb1 + lbe]
-    # identifiers a list that could be long
     if li != -1:
-        li1 = opf_data[li:].find(">")
-        lie = opf_data[li + li1 :].find("<")
-        lid = opf_data[li + li1 + 1 : li + li1 + lie]
+        lid = get_metaprop(opf_data, li)
         if len(lid) == 13 and (lid[0:3] == "978" or lid[0:3] == "979"):
             lid = "ISBN-13: " + lid
         rdict['identifiers'].append(lid)
-    return rdict
+
+    # epubpager meta data
+    lew = opf_data.find('<meta name="tlbepubpager:words"')
+    if lew != -1:
+        rdict['words'] = get_metaprop(opf_data, lew)
+
+    lep = opf_data.find('<meta name="tlbepubpager:words"')
+    if lep != -1:
+        rdict['pages'] = get_metaprop(opf_data, lep)
+
+    lem = opf_data.find('<meta name="tlbepubpager:modified"')
+    if lem != -1:
+        if lem != -1:
+            rdict['modified'] = get_metaprop(opf_data, lem)
+    return rdict# }}}
 
 
-def load_files(directory, flist):
+def load_files(directory, flist):# {{{
     global epub_database
     global bnamelist
 
@@ -919,12 +968,13 @@ def load_files(directory, flist):
     t2 = time.perf_counter()
     tt = t2 - t1
     tbook = tt / idx
+    LogEvent('')
     LogEvent(
         f"Load and scan epubs took {t2-t1:.3f} seconds; {tbook:.3f} seconds per book."
-    )
+    )# }}}
 
 
-def get_dirpath(book):
+def get_dirpath(book):# {{{
     """
     return the path of the directory containing the formats and cover for the book
     """
@@ -945,24 +995,24 @@ def get_dirpath(book):
                 coverpath = f"{tp}cover.jpg"
                 # LogEvent(f"coverpath: {coverpath}")
             break
-    return coverpath, epub_path
+    return coverpath, epub_path# }}}
 
 
 def load_cover(book):  # {{{
     if book.get("cover", False):
         if book["cover"] == "nocover":
-            LogEvent(f"book cover is 'nocover'")
+            LogWarning(f"There is no book cover in the epub file.")
             window["-Cover-"].update(filename=nocover)
             return
         if os.path.exists(book["cover"]):
-            LogEvent(f"load_cover: found cover file {book['cover']}")
+            # LogEvent(f"load_cover: found cover file {book['cover']}")
             if Path(book["cover"]).is_file():
                 size = 256, 256
                 try:
                     im = Image.open(book["cover"])
                 except IOError as e:
                     myerror = e
-                    print(f"{myerror} attempting to open cover file.")
+                    LogWarning(f"{myerror} attempting to open cover file.")
                     return
                 else:
                     im.thumbnail(size, Image.Resampling.LANCZOS)
@@ -970,14 +1020,14 @@ def load_cover(book):  # {{{
                     im.save(pngpath, "PNG")
             window["-Cover-"].update(filename=pngpath)
         else:
-            LogEvent("load_cover: cover file not a file.")
+            LogWarning("load_cover: cover file not a file.")
             window["-Cover-"].update(filename=nocover)
     else:
-        LogWarning("load_cover: Cover is false in database.")
+        LogWarning("load_cover: No cover is available.")
         window["-Cover-"].update(filename=nocover)  # }}}
 
 
-def fix_amp(s):
+def fix_amp(s):# {{{
     amp_escape = [
         "&lt;",
         "&gt;",
@@ -993,10 +1043,10 @@ def fix_amp(s):
     for r in amp_escape:
         s = s.replace(r, amp_replace[idx])
         idx += 1
-    return s
+    return s# }}}
 
 
-def FindTitleAuthor(searchstr):
+def FindTitleAuthor(searchstr):# {{{
 
     #     searchstr = str(searchstr)
     newbooklist = []
@@ -1007,125 +1057,280 @@ def FindTitleAuthor(searchstr):
             or searchstr.casefold() in book["author"].casefold()
         ):
             newbooklist.append(book)
-    return newbooklist
+    return newbooklist# }}}
 
+def paginate_book(book_location): # {{{
+    '''
+    Paginate the book at book_location using the active configuration.
+
+    book_location: text path to an epub file.
+    '''
+
+
+    thread_str = ''
+    if Path(book_location).is_file():
+        paginator = epub_paginator()
+        paginator.outdir = config["outdir"]
+        paginator.match = config["match"]
+        paginator.genplist = config["genplist"]
+        paginator.pgwords = config["pgwords"]
+        paginator.pages = config["pages"]
+        paginator.pageline = config["pageline"]
+        paginator.pl_align = config["pl_align"]
+        paginator.pl_color = config["pl_color"]
+        paginator.pl_bkt = config["pl_bkt"]
+        paginator.pl_fntsz = config["pl_fntsz"]
+        paginator.pl_pgtot = config["pl_pgtot"]
+        paginator.superscript = config["superscript"]
+        paginator.super_color = config["super_color"]
+        paginator.super_fntsz = config["super_fntsz"]
+        paginator.super_total = config["super_total"]
+        paginator.chap_pgtot = config["chap_pgtot"]
+        paginator.chap_bkt = config["chap_bkt"]
+        paginator.ebookconvert = config["ebookconvert"]
+        paginator.epubcheck = config["epubcheck"]
+        paginator.chk_orig = config["chk_orig"]
+        paginator.chk_paged = config["chk_paged"]
+        paginator.quiet = config["quiet"]
+        paginator.DEBUG = config["DEBUG"]
+        return_dict = paginator.paginate_epub(book_location)
+        thread_str += ""
+        thread_str += CR
+        # thread_str += f"Paginated ebook created: {return_dict['bk_outfile']}"
+        thread_str += f"Paginated ebook log is at: "
+        thread_str += CR
+        thread_str += f"  {return_dict['logfile']}"
+        thread_str += CR
+        lpad = 10
+        rpad = 50
+        echk_err = False
+        pager_err = False
+        pager_warn = False
+        if return_dict["pager_error"]:
+            pager_err = True
+            thread_str += " --> Fatal errors occurred in epub_pager. Book may not be properly paginated."
+            thread_str += CR
+            if return_dict["epub_version"][0] == "2":
+                
+                thread_str += " --> This is an ePub2 book. Often if books are first converted to ePub3 "
+                thread_str += CR
+                thread_str += "epubpaginator can successfully paginate them."
+                thread_str += CR
+                for e in return_dict["error_lst"]:
+                    thread_str += f"   --> {e}"
+                    thread_str += CR
+                thread_str += f"See details in log: {return_dict['logfile']}"
+                thread_str += CR
+        if return_dict["pager_warn"]:
+            pager_warn = True
+            thread_str += "  --> There were warnings in epub_pager."
+            thread_str += CR
+            for w in return_dict["warn_lst"]:
+                thread_str += f"   --> {w}"
+                thread_str += CR
+            thread_str += f"See details in log: {return_dict['logfile']}"
+            thread_str += CR
+        if return_dict["echk_fatal"] or return_dict["orig_fatal"]:
+            echk_err = True
+            s = "Fatal Errors"
+            thread_str += ""
+            thread_str += CR
+            thread_str += f"{'-' * lpad}{s}{'-' * (rpad - len(s))}"
+            thread_str += CR
+            thread_str += f"  --> {return_dict['echk_fatal']:3} fatal "
+            thread_str += CR
+            thread_str += f"error(s) in paged book epubcheck."
+            thread_str += CR
+            thread_str += f"  --> {return_dict['orig_fatal']:3} fatal "
+            thread_str += CR
+            thread_str += f"error(s) in original book epubcheck."
+            thread_str += CR
+        if return_dict["echk_error"] or return_dict["orig_error"]:
+            echk_err = True
+            s = "Errors"
+            thread_str += ""
+            thread_str += CR
+            thread_str += f"{'-' * lpad}{s}{'-' * (rpad - len(s))}"
+            thread_str += CR
+            thread_str += f"  --> {return_dict['echk_error']:3} error(s) in paged book epubcheck."
+            thread_str += CR
+            thread_str += f"  --> {return_dict['orig_error']:3} error(s) in original book epubcheck."
+            thread_str += CR
+        if not pager_err and not pager_warn and not echk_err:
+            thread_str += ""
+            thread_str += CR
+            thread_str += f"Processing completed without error."
+            thread_str += CR
+            if not pager_err:
+                thread_str += f"Paginated ebook created: {return_dict['bk_outfile']}"
+                thread_str += CR
+                thread_str += f"See details in log: {return_dict['logfile']}"
+                thread_str += CR
+            thread_str += "-" * (lpad + rpad)
+            thread_str += CR
+            thread_str += ""
+            thread_str += CR
+    else:
+        thread_str += "Pagination not done. No epub file found."
+        thread_str += CR
+    return thread_str
+# }}}
 
 configuration_help = """
-## srcdir SRCDIR
+## Source Folder{{{
+
 Directory to read epub files from.
 
-## outdir OUTDIR
+## Output Folder
+
 Location for output ePub files. Cover files are also stashed here.
 
-## match
-If pagination exists, match it.
+## Generate Pagelist
 
-## genplist
 If no pagination generate the navigation page list and page links
 
-## pgwords PGWORDS
-define words per page; if 0, use pages
+## Defining How Pagination is Done
 
-## pages PAGES
-if = 0 use pgwords; else pgwords=(wordcount/pages)
+If **Match Existing Pagination** is true and a pagelist is found in the epub file, pagelines and superscript pagination are matched to the existing pagelist.
 
-## pageline
-generate and insert page pagelinesinto the ePub text
+If **Match Existing Pagination** is false, page length is determined by the values of Words per Page and Total Pages.
 
-## pl\\_align {right,left,center}
-'right', 'left' or 'center'; specify alignment of the pageline
+If **Words Per Page** and **Total Pages** are both zero, this is a fatal error. epubpager does not know how to define the page length.
 
-## pl\\_color {red,blue,green,none}
-html color for the inserted pageline
+If **Words per Page** is non-zero, this becomes the page length for all pagination generated by epubpager.
 
-## pl\\_bkt {<,(,none}
-character to use to bracket page number
+If **Words per Page** is zero and **Total Pages** is non-zero, then the page length is defined by dividing epubpager's word count for the epub by Total Pages and using that value as Words per Page.
 
-## pl\\_fntsz PL_FNTSZ
-font size as percentage of book font for the pageline
+## Generate Pagelines
 
-## pl\\_pgtot
-include total pages in the pageline
+Generate and insert page pagelines into the ePub text.
 
-## superscript
-generate superscripted page numbers
+## Pageline Font Size
 
-## super\\_color {red,blue,green,none}
-html color for the inserted page pagelinee.g. 'red'
+Pageline font size as percentage of book font.
 
-## super\\_fntsz SUPER\\_FNTSZ
-font size as percentage of book font for the pageline
+## Pageline Alignment
 
-## super\\_total
-include total pages in the pageline
+'right', 'left' or 'center'; specify alignment of the pageline.
 
-## chap\\_pgtot
-include chapter page and total in the pagelineand/or superscript
+## Pageline Color
 
-## chap\\_bkt {<,(,none}
-'<', '(' or nothing; character to use to bracket page number
+html color for the inserted pageline - {red, green, none}.
 
-## epubcheck EPUBCHECK
-location of epubcheck external executable
+## Include Pageline Page Total
 
-## chk\\_paged
-Run epubcheck on paged epub file
+Include total pages in the pageline.
 
-## chk\\_orig
-Run epubcheck on file being paginated
+## Pageline Bracket
 
-## ebookconvert EBOOKCONVERT
-location of ebook conversion executable
+Character to use to bracket page number - {'<', '(' , none}.
+
+## Generate Superscripts
+
+Generate superscripted page numbers.
+
+## Superscript Font Size
+
+Superscript font size as percentage of book font.
+
+## Superscript Color
+
+html color for the inserted page superscript - {red, green, none}.
+
+## Include Superscript Page Total
+
+Include total pages in the superscript.
+
+## Include Chapter Page Total
+
+Include chapter page and total in the pageline and/or superscript.
+
+## Chapter Bracket {<,(,none}
+
+Character to use to bracket page number - '<', '(' or none.
+
+## Ebook Conversion
+
+Location of ebook conversion executable (Calibre's ebook-convert). If this value is blank or incorrect, no conversion will be done. If this value is valid, any version 2 epub will be converted to epub version 3. Generally speaking, epubpage handles converted epub 3 books more effectively than epub version 2 books.
+
+## Use of Epubcheck
+
+If Epubcheck points to an epubcheck executable or script, it will be used when epubcheck is run. 
+
+If Epubcheck is blank, epubpager will check to see if the epubcheck Python module is available, and use it if so. The Python epubceck module can be installed using pip.
+
+Please note the external epubcheck program is about five times faster than the Python module epubcheck.
+
+## Epubcheck
+
+Location of epubcheck external executable.
+
+## Epubcheck Original
+
+Run epubcheck on the original epub file.
+
+## Epubcheck Paged
+
+Run epubcheck on file after pagination.
+
+## Quiet
+
+If Quiet is true, no output will be printed to the console. 
 
 ## DEBUG
-print additional debug information to the log file
+
+Print additional debug information to the log file.
+
 ```
-"""
+"""# }}}
 gui_help = """
-# Basic Operation
+# Basic Operation{{{
 
 **Book List** shows a list of all books in the selected directory. Select any book by clicking on the entry. All fields are updated when the book is changed.
 
-The **Book Data** section gives more detailed information about the selected book. The information here is from the metadata contained in the epub .opf file.
+The **Book Data** section gives additional information taken from the metadata contained in the epub's .opf file. Epubpager inserts its own custom metadata (the word count for the book, and the page count for the book) when paginating an epub. If these are present, they will be displayed. In addition, currently epubpage will not paginate an epub it has already operated on.
 
-The **Output** section contains the title, author and publication date of the selected book. The "blurb" is also shown.
+The **Output** section contains two text view. 
 
-The text section at the right is a log of operations. This section will also show help information if the "Help" button is clicked, or if the configuraiton information is shown.
+The leftmost section displays the book title, author and publication date and a description of the book. The publication data and description are taken from the epub metadata.
+
+The rightmost section serves two functions. Initially it is a log of operations. If the "Help" button is clicked, this field shows help information. Log infomration can again be shown by clicking the "Log" button when help is active.
+
+If the configure button is clicked, this field will show configuration help.
 
 ## Commands
 
 1. **Find** - Search the book list for a string. The list will be populated with all books where the search string is found either in the book title, or the book author.
-2. **Paginate** - The book will be paginated according to the selected configuration. 
-3. **Configure** - Show a page of selectable options for configuring the operation of GUIepubPaginator. For details see the Configuration section of Help.
-4. **About** - Show version information for GUIepubPaginator.
-5. **Help** - Toggle the display of Help information or Log information in the text field at the lower right of the display.
-"""
-
-paging_calculation_help = """
-# Determining the Page Length
-
-If epubpaginator detects an existing page-list element in the navigation file of the epub (this can only occur when the epub file is version 3), 'genplist' is forced to false. epubpaginator does not overwrite or modify an existing page-list and will not generate a second page-list if one exists.
-
-If 'match' is set and a page-list element is found, then pagination for pagelines and/or superscripts is matched to the existing pagination.
-
-If 'genplist' or 'pagelines' or 'super' are enabled and no existing page-list element is found, the pagination will be based on the values of the options 'pgwords' and 'pages' as follows:
-
-1. If 'pgwords' and 'pages' are zero, this is a fatal error. epubpaginator has no way to determine where to place pages.
-2. If 'pgwords' is not zero, its value is used to determine the page length for the paginated book.
-3. If 'pgwords' is zero and 'pages' is not zero, then 'pgwords' is set to the integer value of the book's word count divided by the value of pages. 'pgwords' is then used to determine the page length for the paginated book.
-
-"""
+2. **Paginate** - The book will be paginated according using the selected configuration. 
+3. **Paginate All** - All books in the list will be paginated using the selected configuration.
+4. **Configure** - Show a page of selectable options for configuring the operation of GUIepubPaginator. When configuration is shown it is accompanied by configuration help information in the right text window.
+5. **About** - Show version information for GUIepubPaginator.
+6. **Help/Log** - Toggle the display of Help information or Log information in the text field at the lower right of the display.
+7. **Exit** - Quit the program.
+"""# }}}
 
 
-def update_BookDataFrame(book):  # {{{
+def update_BookDataFrame():  # {{{
     global current_book
     global format_list
 
     window["-BookDataTitle-"].update(current_book["title"])
     window["-BookDataAuthor-"].update(current_book["author"])
     window["-epub_version-"].update(f"{current_book['epub_version']:>7}")
-    window["-Pages-"].update(f"{current_book['pages']:>7}")
-    window["-Words-"].update(f"{current_book['words']:>7}")
+    if current_book['modified']:
+        window["-epMetaData-"].update(visible=True)
+        window["-epPages-"].update(visible=True)
+        window["-epWords-"].update(visible=True)
+        window["-Pages-"].update(visible=True)
+        window["-Pages-"].update(f"{current_book['pages']:>7,d}")
+        window["-Words-"].update(visible=True)
+        window["-Words-"].update(f"{current_book['words']:>7,d}")
+    else:
+        window["-epMetaData-"].update(visible=False)
+        window["-epPages-"].update(visible=False)
+        window["-epWords-"].update(visible=False)
+        window["-Pages-"].update(visible=False)
+        window["-Words-"].update(visible=False)
     window["-pubdate-"].update(current_book["pubdate"])
     if "identifiers" in current_book.keys():
         window["-identifiers-"].update(current_book["identifiers"])
@@ -1142,19 +1347,21 @@ def update_BookDataFrame(book):  # {{{
     # }}}
 
 
-def toggle_configure(window):
+def toggle_configure(window):# {{{
     global show_configure
 
     if show_configure:
         window["-Cover-"].update(visible=False)
         window["-BookList-"].update(visible=False)
-        window["-col_output-"].update(visible=False)
         window["-col_bookdata-"].update(visible=False)
+        window["-col_output-"].update(visible=False)
         window["-Find-"].update(visible=False)
         window["-Paginate-"].update(visible=False)
+        window["-PaginateAll-"].update(visible=False)
         window["-Configure-"].update(visible=False)
         window["-About-"].update(visible=False)
         window["-Help-"].update(visible=False)
+        window["-Exit-"].update(visible=False)
         window["-col_config-"].update(visible=True)
         window["-col_confighelp-"].update(visible=True)
         window["-UpdateConfig-"].update(visible=True)
@@ -1165,21 +1372,37 @@ def toggle_configure(window):
     else:
         window["-Cover-"].update(visible=True)
         window["-BookList-"].update(visible=True)
-        window["-col_output-"].update(visible=True)
         window["-col_bookdata-"].update(visible=True)
+        window["-col_output-"].update(visible=True)
         window["-Find-"].update(visible=True)
         window["-Paginate-"].update(visible=True)
+        window["-PaginateAll-"].update(visible=True)
         window["-Configure-"].update(visible=True)
         window["-About-"].update(visible=True)
         window["-Help-"].update(visible=True)
+        window["-Exit-"].update(visible=True)
         window["-col_config-"].update(visible=False)
         window["-col_confighelp-"].update(visible=False)
         window["-UpdateConfig-"].update(visible=False)
         window["-CancelConfig-"].update(visible=False)
         window["-SaveConfig-"].update(visible=False)
         window["-LoadConfig-"].update(visible=False)
-        show_configure = True
+        show_configure = True# }}}
 
+# def paginate_thread():# {{{
+
+#     tbooks = len(epub_database)
+#     cbook = 1
+#     for book in epub_database:
+#         if book['modified']:
+#             LogWarning(f"{book['title']} has already been paginated by epubpager.")
+#             continue
+#         book_location = book['formats'][0]
+#         LogEvent("")
+#         LogEvent(f"Paginating {book['title']}")
+#         paginate_book(book_location)
+#         cbook += 1
+#         window.write_event_value("-threadupdate-",(cbook, tbooks))
 
 # ---------Layout-------------------------
 # Build the PySimpleGui window with buttons and multiline output
@@ -1250,19 +1473,6 @@ ColBookData = sg.Column(# {{{
                         ),
                     ],
                     [
-                        sg.Text("Pages".rjust(13), font="Menlo 12"),
-                        sg.Input(
-                            default_text="", key="-Pages-", font="Menlo 12", size=(7, 1)
-                        ),
-                    ],
-                    [
-                        sg.Text("Words".rjust(13), font="Menlo 12"),
-                        sg.Input(
-                            default_text="", key="-Words-", font="Menlo 12", size=(7, 1)
-                        ),
-                    ],
-                    [sg.HorizontalSeparator()],
-                    [
                         sg.Text("pubdate".rjust(13), font="Menlo 12"),
                         sg.Input(
                             default_text="",
@@ -1274,6 +1484,27 @@ ColBookData = sg.Column(# {{{
                         sg.Text("Identifiers".rjust(13), font="Menlo 12"),
                         sg.LBox(
                             [], key="-identifiers-", size=(bookdata_textwidth, 1)
+                        ),
+                    ],
+                    [sg.HorizontalSeparator()],
+                    [
+                        sg.Text(
+                            "epubpager Metadata",
+                            size=(60, 1),
+                            font="Menlo 14 bold",
+                            key = "-epMetaData-",
+                        )
+                    ],
+                    [
+                        sg.Text("Pages".rjust(13), font="Menlo 12", key = "-epPages-",),
+                        sg.Input(
+                            default_text="", key="-Pages-", font="Menlo 12", size=(7, 1)
+                        ),
+                    ],
+                    [
+                        sg.Text("Words".rjust(13), font="Menlo 12", key = "-epWords-"),
+                        sg.Input(
+                            default_text="", key="-Words-", font="Menlo 12", size=(7, 1)
                         ),
                     ],
                 ],
@@ -1356,6 +1587,10 @@ ColButtons = sg.Column(# {{{
                             button_text="Paginate",
                         ),
                         sg.Button(
+                            key="-PaginateAll-",
+                            button_text="Paginate All",
+                        ),
+                        sg.Button(
                             key="-Configure-",
                             button_text="Configure",
                         ),
@@ -1366,6 +1601,10 @@ ColButtons = sg.Column(# {{{
                         sg.Button(
                             key="-Help-",
                             button_text="Help",
+                        ),
+                        sg.Button(
+                            key="-Exit-",
+                            button_text="Exit",
                         ),
                         # the configuration buttons
                         sg.Input(
@@ -1786,12 +2025,19 @@ window = sg.Window(
 
 # ------------------ initialize and build window--------------------
 window["-srcdir-"].update(value=config["srcdir"])
+# LogEvent(f"Config file is: {config_file}")
 show_configure = False
 show_help = True
 debug_str = ""
 toggle_configure(window)
 
-show_dict(config)
+# signon message
+LogEvent('')
+LogEvent(f"Epub Paginator Version {Version}")
+LogEvent('')
+
+
+# show_dict(config)
 # window initialization code
 
 # update the booklist, by default the current list
@@ -1813,23 +2059,19 @@ window["-MLINE-" + sg.WRITE_ONLY_KEY].expand(
 )
 # update_view(current_book)
 
-# signon message
-LogEvent("Epub Paginator.")
-LogEvent("Version: " + str(Version))
-
 # and drop into the event loop
 while True:
     event, values = window.read(timeout=100)
     # print(f"event: {event}")
     if event == "sg.TIMEOUT_KEY":
         continue
-    if event in (None, "Quit"):
+    if event in (None, "Quit", "-Exit-"):
         break
     # }}}
     # --About-------------------------------{{{
     elif event == "-About-":
-        LogEvent(f"PySimpleGUI Version, {sg.main_get_debug_data()}")
-        LogEvent(f"tkinter Version, {sg.tclversion_detailed}")
+        sg.main_get_debug_data()
+        # sg.tclversion_detailed
     # }}}
     # --Help-------------------------------{{{
     elif event == "-Help-":
@@ -1838,6 +2080,7 @@ while True:
             window["-DEBUG-" + sg.WRITE_ONLY_KEY].update("")
             render_markdown(hprint, gui_help)
             window['-Help-'].update("Log")
+            window['-DEBUG-' + sg.WRITE_ONLY_KEY].set_vscroll_position(0)
             show_help = False
         else:
             window["-DEBUG-" + sg.WRITE_ONLY_KEY].update("")
@@ -1852,7 +2095,6 @@ while True:
     # ---files-------------------------------------{{{
     elif event == "-files-":
         LogEvent("Event -files-")
-        print(f'''Files selected: {values["-fbfiles-"]}''')
         LogEvent(f'''Files selected: {values["-fbfiles-"]}''')
         flist = values['-fbfiles-'].split(';')
         load_files('', flist)
@@ -1861,9 +2103,6 @@ while True:
             window["-BookList-"].SetValue(bnamelist[0])  
             current_book = epub_database[0]
             update_view(current_book)
-            # change the folder browser to start at this directory next time
-            # window["-fbsrcdir-"].InitialFolder = directory
-            # window["-fbsrcdir-"].update()
         else:
             LogWarning("No epubs selected.")
     # }}}
@@ -1900,69 +2139,74 @@ while True:
 # }}}
     # --Find-----------------------------------------{{{
     elif event == "-Find-":
-        # searchstr = sg.popup_get_text('Search String:', title='Find Book or Author', keep_on_top=True, font='Menlo 12', location=window.mouse_location())
-        if findlist_active:
-            epub_database = copy.deepcopy(save_database)
-            window['-Find-'].update("Find")
-            findlist_active = False
-            #update the booklist view.
-            bnamelist = []
-            idx = 1
-            for book in epub_database:
-                bname = create_bookname(book["title"], book["author"])
-                if idx < 10:
-                    bnamelist.append(f" {idx}. {book['title']} by {book['author']}")
-                else:
-                    bnamelist.append(f"{idx}. {book['title']} by {book['author']}")
-                idx += 1
-            window['-BookList-'].update(values=bnamelist)
-            current_book = epub_database[0]
-            update_view(current_book)
+        if paginate_count:
+            paginate_count = 0
+            LogWarning("Pagination canceled.")
+            LogWarning("Wait for completion message of in progress book.")
         else:
-            searchstr = sg.popup_get_text(
-                "Search String:",
-                title="Find Book or Author",
-                font="Menlo 12",
-                location=window.mouse_location(),
-            )
-            if searchstr is not None:
-                findlist_active = True
-                window['-Find-'].update("ShowAll")
-                findlist = FindTitleAuthor(searchstr)
-                if len(findlist) == 0:
-                    LogWarning("Nothing found")
-                else:
-                    save_database = copy.deepcopy(epub_database)
-                    epub_database = copy.deepcopy(findlist)
-                    #update the booklist view.
-                    bnamelist = []
-                    idx = 1
-                    for book in epub_database:
-                        bname = create_bookname(book["title"], book["author"])
-                        if idx < 10:
-                            bnamelist.append(f" {idx}. {book['title']} by {book['author']}")
-                        else:
-                            bnamelist.append(f"{idx}. {book['title']} by {book['author']}")
-                        idx += 1
-                    window['-BookList-'].update(values=bnamelist)
-                    current_book = epub_database[0]
-                    update_view(current_book)
+            if findlist_active:
+                epub_database = copy.deepcopy(save_database)
+                window['-Find-'].update("Find")
+                findlist_active = False
+                #update the booklist view.
+                bnamelist = []
+                idx = 1
+                for book in epub_database:
+                    bname = create_bookname(book["title"], book["author"])
+                    if idx < 10:
+                        bnamelist.append(f" {idx}. {book['title']} by {book['author']}")
+                    else:
+                        bnamelist.append(f"{idx}. {book['title']} by {book['author']}")
+                    idx += 1
+                window['-BookList-'].update(values=bnamelist)
+                current_book = epub_database[0]
+                update_view(current_book)
+            else:
+                searchstr = sg.popup_get_text(
+                    "Search String:",
+                    title="Find Book or Author",
+                    font="Menlo 12",
+                    location=window.mouse_location(),
+                )
+                if searchstr is not None:
+                    findlist_active = True
+                    window['-Find-'].update("ShowAll")
+                    findlist = FindTitleAuthor(searchstr)
+                    if len(findlist) == 0:
+                        LogWarning("Nothing found")
+                    else:
+                        save_database = copy.deepcopy(epub_database)
+                        epub_database = copy.deepcopy(findlist)
+                        #update the booklist view.
+                        bnamelist = []
+                        idx = 1
+                        for book in epub_database:
+                            bname = create_bookname(book["title"], book["author"])
+                            if idx < 10:
+                                bnamelist.append(f" {idx}. {book['title']} by {book['author']}")
+                            else:
+                                bnamelist.append(f"{idx}. {book['title']} by {book['author']}")
+                            idx += 1
+                        window['-BookList-'].update(values=bnamelist)
+                        current_book = epub_database[0]
+                        update_view(current_book)
 # }}}
     # --Configure -----------------------------------{{{
     elif event == "-Configure-":
-        LogEvent("Open Configure Page")
+        # LogEvent("Open Configure Page")
         toggle_configure(window)
         render_markdown(cprint, configuration_help)
+        window['-config_help-' + sg.WRITE_ONLY_KEY].set_vscroll_position(0)
 # }}}
     # --Cancel-----------------------------------{{{
     elif event == "-CancelConfig-":
-        LogEvent("Close config page without saving.")
+        # LogEvent("Close config page without saving.")
         toggle_configure(window)
 # }}}
     # --UpdateConfig-----------------------------------{{{
     elif event == "-UpdateConfig-":
-        LogEvent("Update config dictionary and close config page.")
-        LogEvent(f"cfgsrcdir: {window['-cfgsrcdir-'].get()}")
+        # LogEvent("Update config dictionary and close config page.")
+        # LogEvent(f"cfgsrcdir: {window['-cfgsrcdir-'].get()}")
         update_config(values)
         window["-srcdir-"].update(value=config["srcdir"])
         window["-outdir-"].update(value=config["outdir"])
@@ -1980,39 +2224,40 @@ while True:
     # --config_file-----------------------------------{{{
     elif event == "-config_file-":
         config_file = values["-config_file-"]
-        window["-config_label-"].update(f"Config File: {config_file}")
-        LogEvent(f"-config_file- event; config_file input element: {config_file}")
-        with open(config_file, "r") as cfg_file:
-            config = json.loads(cfg_file.read())
-            # now update the displayed window
-            window["-outdir-"].update(config["outdir"])
-            window["-genplist-"].update(config["genplist"])
-            window["-match-"].update(config["match"])
-            window["-pgwords-"].update(config["pgwords"])
-            window["-pages-"].update(config["pages"])
-            window["-pageline-"].update(config["pageline"])
-            window["-pl_fntsz-"].update(config["pl_fntsz"])
-            window["-align_left-"].update(config["pl_align"] == "left")
-            window["-align_center-"].update(config["pl_align"] == "center")
-            window["-align_right-"].update(config["pl_align"] == "right")
-            window["-pl_color_red-"].update(config["pl_color"] == "red")
-            window["-pl_color_green-"].update(config["pl_color"] == "green")
-            window["-pl_color_none-"].update(config["pl_color"] == "none")
-            window["-pl_pgtot-"].update(config["pl_pgtot"])
-            window["-pl_bkt_angle-"].update(config["pl_bkt"])
-            window["-pl_bkt_paren-"].update(config["pl_bkt"])
-            window["-pl_bkt_none-"].update(config["pl_bkt"])
-            window["-superscript-"].update(config["superscript"])
-            window["-super_fntsz-"].update(config["super_fntsz"])
-            window["-super_color_red-"].update(config["pl_color"])
-            window["-super_color_green-"].update(config["pl_color"])
-            window["-super_color_none-"].update(config["pl_color"])
-            window["-ebookconvert-"].update(config["ebookconvert"])
-            window["-epubcheck-"].update(config["epubcheck"])
-            window["-chk_orig-"].update(config["chk_orig"])
-            window["-chk_paged-"].update(config["chk_paged"])
-            window["-quiet-"].update(config["quiet"])
-            window["-DEBUG-"].update(config["DEBUG"])
+        if Path(config_file).is_file():
+            # window["-config_label-"].update(f"Config File: {config_file}")
+            LogEvent(f"-config_file- event; config_file input element: {config_file}")
+            with open(config_file, "r") as cfg_file:
+                config = json.loads(cfg_file.read())
+                # now update the displayed window
+                window["-outdir-"].update(config["outdir"])
+                window["-genplist-"].update(config["genplist"])
+                window["-match-"].update(config["match"])
+                window["-pgwords-"].update(config["pgwords"])
+                window["-pages-"].update(config["pages"])
+                window["-pageline-"].update(config["pageline"])
+                window["-pl_fntsz-"].update(config["pl_fntsz"])
+                window["-align_left-"].update(config["pl_align"] == "left")
+                window["-align_center-"].update(config["pl_align"] == "center")
+                window["-align_right-"].update(config["pl_align"] == "right")
+                window["-pl_color_red-"].update(config["pl_color"] == "red")
+                window["-pl_color_green-"].update(config["pl_color"] == "green")
+                window["-pl_color_none-"].update(config["pl_color"] == "none")
+                window["-pl_pgtot-"].update(config["pl_pgtot"])
+                window["-pl_bkt_angle-"].update(config["pl_bkt"])
+                window["-pl_bkt_paren-"].update(config["pl_bkt"])
+                window["-pl_bkt_none-"].update(config["pl_bkt"])
+                window["-superscript-"].update(config["superscript"])
+                window["-super_fntsz-"].update(config["super_fntsz"])
+                window["-super_color_red-"].update(config["pl_color"])
+                window["-super_color_green-"].update(config["pl_color"])
+                window["-super_color_none-"].update(config["pl_color"])
+                window["-ebookconvert-"].update(config["ebookconvert"])
+                window["-epubcheck-"].update(config["epubcheck"])
+                window["-chk_orig-"].update(config["chk_orig"])
+                window["-chk_paged-"].update(config["chk_paged"])
+                window["-quiet-"].update(config["quiet"])
+                window["-DEBUG-"].update(config["DEBUG"])
     # }}}
     # --save_config-----------------------------------{{{
     elif event == "-save_config-":
@@ -2025,106 +2270,78 @@ while True:
         with open(values["-save_config-"], "w") as cfg_file:
             cfg_file.write(json.dumps(config, indent=4))
     # }}}
-    # --Paginate  -----------------------------------{{{
+    # --Paginate-----------------------------------{{{
     elif event == "-Paginate-":
-        LogEvent("--> Paginate the current book")
-        # print_dict(current_book)
-        book_location = ""
-        format_list = current_book["formats"]
-        for filename in format_list:
-            if "epub" in filename:
-                book_location = f"{config['srcdir']}/{filename}"
-                LogEvent("epub file is at: " + book_location)
-                break
-        print(config["pgwords"])
-        if Path(book_location).is_file():
-            paginator = epub_paginator()
-            paginator.outdir = config["outdir"]
-            paginator.match = config["match"]
-            paginator.genplist = config["genplist"]
-            paginator.pgwords = config["pgwords"]
-            paginator.pages = config["pages"]
-            paginator.pageline = config["pageline"]
-            paginator.pl_align = config["pl_align"]
-            paginator.pl_color = config["pl_color"]
-            paginator.pl_bkt = config["pl_bkt"]
-            paginator.pl_fntsz = config["pl_fntsz"]
-            paginator.pl_pgtot = config["pl_pgtot"]
-            paginator.superscript = config["superscript"]
-            paginator.super_color = config["super_color"]
-            paginator.super_fntsz = config["super_fntsz"]
-            paginator.super_total = config["super_total"]
-            paginator.chap_pgtot = config["chap_pgtot"]
-            paginator.chap_bkt = config["chap_bkt"]
-            paginator.ebookconvert = config["ebookconvert"]
-            paginator.epubcheck = config["epubcheck"]
-            paginator.chk_orig = config["chk_orig"]
-            paginator.chk_paged = config["chk_paged"]
-            paginator.quiet = config["quiet"]
-            paginator.DEBUG = config["DEBUG"]
-            return_dict = paginator.paginate_epub(book_location)
-            LogWarning("---> Pagination")
-            LogEvent("")
-            # LogEvent(f"Paginated ebook created: {return_dict['bk_outfile']}")
-            LogEvent(f"Paginated ebook log: {return_dict['logfile']}")
-            lpad = 10
-            rpad = 50
-            echk_err = False
-            pager_err = False
-            pager_warn = False
-            if return_dict["pager_error"]:
-                pager_err = True
-                LogEvent(
-                    " --> Fatal errors occurred in epub_pager. Book may not be properly paginated."
-                )
-                if return_dict["epub_version"][0] == "2":
-                    LogEvent(
-                        " --> This is an ePub2 book. Often if books are first converted to ePub3 "
-                        "epubpaginator can successfully paginate them."
-                    )
-                    for e in return_dict["error_lst"]:
-                        LogEvent(f"   --> {e}")
-                    LogEvent(f"See details in log: {return_dict['logfile']}")
+        if current_book['modified']:
+            LogWarning(f"{current_book['title']} has already been paginated by epubpager.")
+            continue
+        book_location = current_book['formats'][0]
+        LogEvent("")
+        LogEvent(f"Paginating {current_book['title']}")
+        # set this globals so that -threadupdate- event stops properly.
+        paginate_count = 0
+        window.perform_long_operation(lambda : paginate_book(book_location), "-threadupdate-")
+    # }}}
+    # --Paginate All-----------------------------------{{{
+    elif event == "-PaginateAll-":
+        """
+        Possibility:
+        A. Must modify paginate_book to not call LogEvent, but rather store the output in a string.
+        1. PaginateAll set up:
+            1. Generate a list of books to paginate as paginate_list
+            2. Toggle visibility of buttons to avoid interruption that is inconsistent.
+               Set up Find button to enable stopping.
+            3. pbook is set to 0, the first book in the list
+            4. ptot is set to len(paginate_list)
+            5. Generate an event called -NextBook-.
+        2. Next Book event tasks:
+            1. If stop_pagination is True, we have been terminated. 
+               1. Reverse toggle of button visibility.
+               2. exit the NextBook event without launching another pagination.
+            2. if stop_pagination is False, paginate the next book using perform_long_operation which will generate another Next_Book event.
+               1. When pagination is done, 
+        """
+        LogEvent("--> Paginate books in list.")
+        window['-fbsrcdir-'].update(visible=False)
+        window['-fbfiles-'].update(visible=False)
+        window['-Paginate-'].update(visible=False)
+        window['-PaginateAll-'].update(visible=False)
+        window['-Configure-'].update(visible=False)
+        window['-About-'].update(visible=False)
+        window['-Help-'].update(visible=False)
+        window['-Exit-'].update(visible=False)
+        window['-Find-'].update("Cancel Paginate All")
+        # build the paginate_list from the epub_database
+        # paginating = True
+        # cancel_pagination = False
+        paginate_list = []
+        for book in epub_database:
+            if book['modified']:
+                LogWarning(f"{book['title']} has already been paginated by epubpager.")
+            else:
+                paginate_list.append(book['formats'][0])
+        paginate_count = len(paginate_list)
+        book_location = paginate_list[paginate_count - 1]
+        window.perform_long_operation(lambda : paginate_book(book_location), "-threadupdate-")
 
-            if return_dict["pager_warn"]:
-                pager_warn = True
-                LogEvent("  --> There were warnings in epub_pager.")
-                for w in return_dict["warn_lst"]:
-                    LogEvent(f"   --> {w}")
-                LogEvent(f"See details in log: {return_dict['logfile']}")
-            if return_dict["echk_fatal"] or return_dict["orig_fatal"]:
-                echk_err = True
-                s = "Fatal Errors"
-                LogEvent("")
-                LogEvent(f"{'-' * lpad}{s}{'-' * (rpad - len(s))}")
-                LogEvent(
-                    f"  --> {return_dict['echk_fatal']:3} fatal "
-                    f"error(s) in paged book epubcheck."
-                )
-                LogEvent(
-                    f"  --> {return_dict['orig_fatal']:3} fatal "
-                    f"error(s) in original book epubcheck."
-                )
-            if return_dict["echk_error"] or return_dict["orig_error"]:
-                echk_err = True
-                s = "Errors"
-                LogEvent("")
-                LogEvent(f"{'-' * lpad}{s}{'-' * (rpad - len(s))}")
-                LogEvent(
-                    f"  --> {return_dict['echk_error']:3} error(s) in paged book epubcheck."
-                )
-                LogEvent(
-                    f"  --> {return_dict['orig_error']:3} error(s) in original book epubcheck."
-                )
-            if not pager_err and not pager_warn and not echk_err:
-                LogEvent("")
-                LogEvent(f"Processing completed without error.")
-                if not pager_err:
-                    LogEvent(f"Paginated ebook created: {return_dict['bk_outfile']}")
-                    LogEvent(f"See details in log: {return_dict['logfile']}")
-            LogEvent("-" * (lpad + rpad))
-            LogEvent("")
+    # }}}
+    elif event == "-threadupdate-":
+        # update the text field with the return data from paginate_book
+        LogEvent(values[event])
+        paginate_count -= 1
+        if paginate_count >= 0:
+            book_location = paginate_list[paginate_count - 1]
+            window.perform_long_operation(lambda : paginate_book(book_location), "-threadupdate-")
         else:
-            LogEvent("Pagination not done. No epub file found.")
-# }}}
+            LogWarning("All books paginated.")
+            window['-fbsrcdir-'].update(visible=True)
+            window['-fbfiles-'].update(visible=True)
+            window['-Paginate-'].update(visible=True)
+            window['-PaginateAll-'].update(visible=True)
+            window['-Configure-'].update(visible=True)
+            window['-About-'].update(visible=True)
+            window['-Help-'].update(visible=True)
+            window['-Exit-'].update(visible=True)
+            window['-Find-'].update("Find")
+
 window.close()

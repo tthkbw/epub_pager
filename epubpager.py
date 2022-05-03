@@ -13,6 +13,7 @@ opf_dictkey = "package"
 pglnk = "pagetb"
 epubns = 'xmlns:epub="http://www.idpf.org/2007/ops"'
 pg_xmlns = f'<nav {epubns} epub:type="page-list" id="page-list" hidden="hidden"><ol> \n'
+comment_epubpager ="This epub was modified by epubpager https://github.com/tthkbw/epub_pager "
 
 has_echk = True
 try:
@@ -40,8 +41,24 @@ class epub_paginator:
 
     **Release Notes**
 
+    ** Version 3.6**
+    1. Metadata added to opf file with words, pages, modified by epubpager notation.
+    2. Fixed a bug in logic that caused no pagination under circumstances where
+       pagination should have been done.
+
+    TODO
+
+    **Version 3.5** 
+    Done
+    1. Added a check to do nothing if the book has a plist and pagelines and
+    superscripts were not requested.
+
+    **Version 3.4**
+    1. Added quiet to the configuration. If set, nothing is echoed to stdout.
+
     **Version 3.3**
     1. prepare for release on GitHub.
+
     **Version 3.2**
     1. Added capability of not setting genplist, pageline or superscript and
     epubpager will just convert, count words and count pages.
@@ -115,7 +132,7 @@ class epub_paginator:
     pageline format--too confusing and not worth it. Wasn't implemented in the
     options anyway.
 
-    **Version 2.98**# {{{
+    **Version 2.98**
     1. Begin implmentation of new scanning algorithm. This algorithm
     improves the scan by more than 5x. Same changes to scan_file,
     count_words and scan_sections.
@@ -268,10 +285,10 @@ class epub_paginator:
     1. Verifies epub3 version.
     1. Verifies nav file exists.
     1. Doesn't generate page-list if it already exists.
-    1. Adds chapter page numbering.# }}}
+    1. Adds chapter page numbering.
     """
 
-    version = "3.3"
+    version = "3.5"
     curpg = 1  # current page number
     tot_wcnt = 0  # count of total words in the book
     pg_wcnt = 0  # word count per page
@@ -315,6 +332,7 @@ class epub_paginator:
     """
 
     def __init__(self):
+        # Instance Variables 
         """
         **Instance Variables**
 
@@ -406,16 +424,19 @@ class epub_paginator:
 
         Run epubcheck on the file before pagination
 
-        **_chk_paged**
+        **_chk_paged_**
 
         Run epubcheck on the paged epub after pagination
 
+        **_quiet_**
+
+        Do not print anything to stdout.
         **_DEBUG_**
 
         Boolean. If True, print status and debug information to logile
         while running.
 
-        """
+        """ 
         self.outdir = "/Users/tbrown/Documents/projects/" "BookTally/paged_epubs"
         self.genplist = True
         self.match = True
@@ -437,6 +458,7 @@ class epub_paginator:
         self.chk_orig = False
         self.chk_paged = False
         self.epubcheck = "none"  # path to epubcheck executable
+        self.quiet = False
         self.DEBUG = False
 
     # the following two routines are modified from those on GitHub:
@@ -570,6 +592,8 @@ class epub_paginator:
         # find the opf file using the META-INF/container.xml file
         # operate from the unzipped epub
         opf_file = self.find_opf(self.rdict["unzip_path"])
+        # Watch Out!!
+        self.rdict["opf_file"] = opf_file
         if self.rdict["pager_error"]:
             return
         self.rdict["disk_path"] = ""
@@ -611,7 +635,6 @@ class epub_paginator:
             if vloc != -1:
                 vlist = opfdata[vloc : vloc + 15].split('"')
                 eversion = vlist[1]
-                # print(f"new_get_epub_version: The epub version is: {eversion}")
                 return eversion
             else:
                 estr = "Fatal error: Did not find version string in opf file."
@@ -765,11 +788,37 @@ class epub_paginator:
         The message to print
 
         """
-        if stdout:
+        if stdout and not self.quiet:
             print(message)
             self.rdict["messages"] += "\n" + message
         with self.logpath.open("a") as logfile:
             logfile.write(message + "\n")
+
+    def update_opffile(self):
+        """
+        add metadata to the opf file if the pagination was successful
+            # Add custom metadata to opf file
+            # <meta name="tlbepubpager:words" content="57000"/>
+            # <meta name="tlbepubpager:pages" content="197"/>
+            # <meta name="tlbepubpager:modified" content="True"/>
+        """
+        with Path(self.rdict["opf_file"]).open("r") as opf_file_read:
+            opf_data = opf_file_read.read()
+        mloc = opf_data.find("</metadata>")
+        if mloc != -1:
+            self.wrlog(True,f"Found end of metadata: {opf_data[mloc-20:mloc+20]}")
+            new_opf = opf_data[:mloc]
+            new_opf += f'''<meta name="tlbepubpager:words" content="{self.rdict['words']}"/>'''
+            new_opf += CR
+            new_opf += f'''<meta name="tlbepubpager:pages" content="{self.rdict['pages']}"/>'''
+            new_opf += CR
+            new_opf += f'''<meta name="tlbepubpager:modified" content="True"/>'''
+            new_opf += CR
+            new_opf += opf_data[mloc:]
+            with Path(self.rdict["opf_file"]).open("w") as opf_file_write:
+                opf_file_write.write(new_opf)
+        else:
+            self.wrlog(True,f"Did not find end of metadata")
 
     def update_navfile(self):
         """
@@ -974,6 +1023,7 @@ class epub_paginator:
                 self.wrlog(False, lstr)
             href = urllib.parse.quote(manifest_item["href"])
             return href
+        print(f"nav and opf at different levels")
         np = nav_list[: len(nav_list) - 1]
         nav_path = opf_path + np
         if self.DEBUG:
@@ -1017,6 +1067,8 @@ class epub_paginator:
         Path to unzipped epub file.
 
         """
+        # TODO
+        # Write the comment_epubpager comment to the container file.
         # find the opf file, which contains the version information
         cfile = Path(f"{path}/META-INF/container.xml")
         contain_str = cfile.read_text(encoding="utf-8")
@@ -1193,6 +1245,11 @@ class epub_paginator:
         for item in self.rdict["manifest"]:
             for key in item:
                 self.wrlog(False, f"  {key}: {item[key]}")
+
+    def dump_dict(self, name, ld):
+        self.wrlog(False, f"{name}:")
+        for key in ld.keys():
+            self.wrlog(False, f"  {key}: {ld[key]}")
 
     def scan_spine(self, path):
         """
@@ -1710,7 +1767,7 @@ class epub_paginator:
                 else:
                     pgbook += ebook_data[:loc]
                     ebook_data = ebook_data[loc:]
-        return pgbook  # }}}
+        return pgbook  
 
     def scan_match_file(self, ebook_data, chapter):
         """
@@ -1836,7 +1893,7 @@ class epub_paginator:
                                 thispage, sct_pg, chapter["sct_pgcnt"]
                             )
                     sct_pg += 1
-        return pgbook  # }}}
+        return pgbook
 
     def run_chk_external(self, original):
         t1 = time.perf_counter()
@@ -2041,6 +2098,7 @@ class epub_paginator:
         self.plist = ""
         self.bk_flist = []
 
+        # rdict definition 
         self.rdict["logfile"] = ""  # logfile Path
         self.rdict["bk_outfile"] = ""  # outfile Path
         self.rdict["unzip_path"] = ""  # unzipped epub Path
@@ -2071,6 +2129,7 @@ class epub_paginator:
         self.rdict["epubchkpage_time"] = 0  # time to run epubcheck on paged epub
         self.rdict["epubchkorig_time"] = 0  # time to run epubcheck on original epub
         self.rdict["messages"] = ""  # list of messages generated.
+        
 
         # initialize logfile
         # The epub name is the book file name with spaces removed and '.epub'
@@ -2182,6 +2241,14 @@ class epub_paginator:
             self.run_chk(True)
         # figure out where everything is and the order they are in.
         self.scan_spine(self.rdict["unzip_path"])
+        # if we have a plist and aren't generating pagelines or superscripts, there is nothing to do.
+        if self.rdict['has_plist'] and not self.pageline and not self.superscript:
+            estr = "This book has an existing pagelist and neither pagelines nor superscripts were requested."
+            self.wrlog(True, f"{estr}")
+            self.wrlog(True, f"There is nothing to do.")
+            self.rdict["warn_lst"].append(estr)
+            self.rdict["pager_warn"] = True
+            return(self.rdict)
         if self.rdict["pager_error"]:
             self.wrlog(False, "Fatal error.")
             return self.rdict
@@ -2301,6 +2368,8 @@ class epub_paginator:
             if self.genplist:
                 self.plist += "  </ol></nav>" + CR
                 self.update_navfile()
+            self.update_opffile()
+
             # build the epub file
             # self.wrlog(
             #     True,
@@ -2358,8 +2427,9 @@ class epub_paginator:
                 self.rdict["error_lst"].append(estr)
                 self.wrlog(True, estr)
         self.wrlog(False, "Dumping rdict")
-        for key in self.rdict.keys():
-            if key != "manifest" and key != "spine_lst":
-                self.wrlog(False, f"{key}: {self.rdict[key]}")
+        self.dump_dict("rdict", self.rdict)
+        # for key in self.rdict.keys():
+        #     if key != "manifest" and key != "spine_lst":
+        #         self.wrlog(False, f"{key}: {self.rdict[key]}")
 
         return self.rdict

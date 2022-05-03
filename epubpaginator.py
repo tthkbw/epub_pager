@@ -9,6 +9,7 @@ from epubpager import epub_paginator
 # Added argparse for parsing command line options. There are options to set and
 # default values for every option that epub_pager supports.
 # changed name of footer to pageline
+# added quiet parameter
 
 # Defaults for all options
 #     "outdir": "./",
@@ -31,6 +32,7 @@ from epubpager import epub_paginator
 #     "ebookconvert": "/Applications/calibre.app/Contents/MacOS/ebook-convert",
 #     "chk_orig": True,
 #     "chk_paged": True,
+#     "quiet": False,
 #     "DEBUG": False,
 # }
 
@@ -159,6 +161,12 @@ def main():
         default="none",
     )
     parser.add_argument(
+        "--quiet",
+        help="Do not echo output to stdout",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
         "--DEBUG",
         help="print additional debug information to the log file",
         action="store_true",
@@ -166,8 +174,32 @@ def main():
     )
     args = parser.parse_args()
 
-    # def get_config(args) -> Dict:
     def get_config(args):
+        default_cfg = {
+            "outdir": "./",
+            "match": True,
+            "genplist": True,
+            "pgwords": 275,
+            "pages": 0,
+            "pageline": True,
+            "pl_align": "center",
+            "pl_color": "red",
+            "pl_bkt": "<",
+            "pl_fntsz": "75%",
+            "pl_pgtot": True,
+            "superscript": False,
+            "super_color": "red",
+            "super_fntsz": "60%",
+            "super_total": False,
+            "chap_pgtot": True,
+            "chap_bkt": "",
+            "ebookconvert": "",
+            "epubcheck": "/Users/tbrown/bin/epubcheck.sh",
+            "chk_orig": False,
+            "chk_paged": True,
+            "quiet": False,
+            "DEBUG": False
+        }
         if args.cfg:
             cfile = Path(args.cfg)
             if cfile.exists():
@@ -176,9 +208,10 @@ def main():
                     return dict(json.loads(config_file.read()))
             else:
                 print(
-                    f" --> Aborted: Specified configuration file {args.cfg} not found."
+                    f" --> Specified configuration file {args.cfg} not found."
+                    f"Returning default coniguration."
                 )
-                return dict({})
+                return (default_cfg)
         else:
             # no config file, build the config from the parameters
             config = dict({})
@@ -230,6 +263,7 @@ def main():
     paginator.epubcheck = config["epubcheck"]
     paginator.chk_orig = config["chk_orig"]
     paginator.chk_paged = config["chk_paged"]
+    paginator.quiet = config["quiet"]
     paginator.DEBUG = config["DEBUG"]
 
     lpad = 10
