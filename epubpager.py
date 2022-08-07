@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 import typing
 import urllib.parse
+import io
 
 import zipfile
 
@@ -45,6 +46,11 @@ class epub_paginator:
     1. Metadata added to opf file with words, pages, modified by epubpager notation.
     2. Fixed a bug in logic that caused no pagination under circumstances where
        pagination should have been done.
+    3. Added 'endp' as a format for pagelines. If selected, then no new
+    paragraph is created for the pageline, it is inserted at the end of the
+    paragraph in which the pagebreak occurs.
+    4. Fixed two problems where wrlog was called before logpath was setup and
+    caused fatal path errors.
 
     TODO
 
@@ -288,7 +294,7 @@ class epub_paginator:
     1. Adds chapter page numbering.
     """
 
-    version = "3.5"
+    version = "3.6"
     curpg = 1  # current page number
     tot_wcnt = 0  # count of total words in the book
     pg_wcnt = 0  # word count per page
@@ -857,7 +863,7 @@ class epub_paginator:
         self.plist += CR
         return
 
-    def bld_foot(self, curpg, sct_pg, sct_pgcnt):
+    def bld_pageline(self, curpg, sct_pg, sct_pgcnt):
         """
         Format and return page pageline.
 
@@ -909,18 +915,35 @@ class epub_paginator:
             pagestr_chapterpages = ""
         pagestr = pagestr_bookpages + pagestr_chapterpages
         if self.pl_color == "none":
-            pageline = (
-                f'<p style="font-size:{self.pl_fntsz}; '
-                f'text-align: self.pl_align; margin: 0 0 0 0">'
-                f"{pagestr}</p>"
-            )
+            if self.pl_align == 'endp':
+                # endp means put the page information at the end of the current
+                # paragraph, so no text-align and no ending or starting <p> and
+                # use a <div> instead
+                pageline = (
+                    f'<span style="font-size:{self.pl_fntsz}; '
+                    f'margin: 0 0 0 0">'
+                    f" {pagestr}</span>"
+                )
+            else:
+                pageline = (
+                    f'<p style="font-size:{self.pl_fntsz}; '
+                    f'text-align: self.pl_align; margin: 0 0 0 0">'
+                    f"{pagestr}</p>"
+                )
         else:
-            pageline = (
-                f'<p style="font-size:{self.pl_fntsz}; '
-                f"text-align:{self.pl_align}; "
-                f'color: {self.pl_color}; margin: 0 0 0 0">'
-                f"{pagestr}</p>"
-            )
+            if self.pl_align == 'endp':
+                pageline = (
+                    f'<span style="font-size:{self.pl_fntsz}; '
+                    f'color: {self.pl_color}; margin: 0 0 0 0">'
+                    f" {pagestr}</span>"
+                )
+            else:
+                pageline = (
+                    f'<p style="font-size:{self.pl_fntsz}; '
+                    f"text-align:{self.pl_align}; "
+                    f'color: {self.pl_color}; margin: 0 0 0 0">'
+                    f"{pagestr}</p>"
+                )
         return pageline
 
     def new_super(self, curpg, sct_pg, sct_pgcnt):
@@ -1423,11 +1446,12 @@ class epub_paginator:
             stat["el"] += ebdata[: loc + 3]
             stat["idx"] = loc + 3
         elif eltype == "nav":
-            self.wrlog(False, "skipping nav")
+            # self.wrlog(False, "skipping nav")
             loc = ebdata.find("/nav")
             stat["el"] += ebdata[: loc + 5]
             # self.wrlog(False, f"html element: {stat['el']}")
             stat["idx"] = loc + 5
+        # self.wrlog(False, str(stat))
         return stat
 
     def count_words(self):
@@ -1667,22 +1691,36 @@ class epub_paginator:
             if ebook_data[0] == "<":
                 stat = self.process_html(ebook_data[idx:])
                 if stat["done"]:
-                    # self.wrlog(False,(f"writing last: "
-                    #                 f"{ebook_data[stat['idx']:]}"))
-                    pgbook += ebook_data[: stat["idx"]]
-                    pgbook += ebook_data[stat["idx"] :]
+                    pgbook += ebook_data
                     done = True
                 else:
-                    pgbook += ebook_data[: stat["idx"]]
-                    ebook_data = ebook_data[stat["idx"] :]
-                    insfoot = stat["el"] == "</p>" or stat["el"] == "</div>"
-                    if insfoot and pl_lst:
-                        for pl in pl_lst:
-                            pgbook += pl
-                            self.wrlog(
-                                False, f"Inserting pageline: {pl} in {chapter['href']}"
-                            )
-                        pl_lst = []
+                    if self.pl_align != 'endp':
+                        # pgbook += ebook_data[: stat["idx"]]
+                        pgbook += stat["el"]
+                        ebook_data = ebook_data[stat["idx"] :]
+                        insfoot = stat["el"] == "</p>" or stat["el"] == "</div>"
+                        if insfoot and pl_lst:
+                            for pl in pl_lst:
+                                pgbook += pl
+                                self.wrlog(
+                                    False, f"Inserting pageline: {pl} in {chapter['href']}"
+                                )
+                            pl_lst = []
+                    else:
+                        ebook_data = ebook_data[stat["idx"] :]
+                        insfoot = stat["el"] == "</p>" or stat["el"] == "</div>"
+                        if insfoot and pl_lst:
+                            for pl in pl_lst:
+                                pgbook += pl
+                                self.wrlog(
+                                    False, f"Inserting pageline: {pl} in {chapter['href']}"
+                                )
+                            pgbook += stat["el"]
+                        else:
+                            # pgbook += ebook_data[: stat["idx"]]
+                            pgbook += stat["el"]
+                            # ebook_data = ebook_data[len(stat["el"]):]
+                            pl_lst = []
             else:
                 # we are at the beginning of a text string, just past
                 # the <p>
@@ -1702,7 +1740,7 @@ class epub_paginator:
                     # boundary
                     if self.pageline:
                         pl_lst.append(
-                            self.bld_foot(self.curpg, sct_pg, chapter["sct_pgcnt"])
+                            self.bld_pageline(self.curpg, sct_pg, chapter["sct_pgcnt"])
                         )
                     # need == -1 means page ends just before this
                     # paragraph, put the pagelist entry here. Also,
@@ -1885,11 +1923,12 @@ class epub_paginator:
                         self.rdict["warn_lst"].append(lstr)
                         self.rdict["pager_warn"] = True
                     else:
-                        loc += 4
+                        if self.pl_align != 'endp':
+                            loc += 4
                         pgbook += ebook_data[:loc]
                         ebook_data = ebook_data[loc:]
                         if self.pageline:
-                            pgbook += self.bld_foot(
+                            pgbook += self.bld_pageline(
                                 thispage, sct_pg, chapter["sct_pgcnt"]
                             )
                     sct_pg += 1
@@ -2065,6 +2104,59 @@ class epub_paginator:
                 self.wrlog(False, f" --> No epubcheck is available.")
                 return
 
+    def read_opf(self, epub_file):# {{{
+        "Read the opf file data from the epub zipfile and return the opf_path and opf_data."
+
+        opf_data = "No opf data"
+        opf_path = "No opf path"
+        # find the opf file
+
+        with zipfile.ZipFile(epub_file) as zfile:
+            with zfile.open(f"META-INF/container.xml") as c:
+                c_data = c.read()
+
+                cs = str(c_data)
+                rloc = cs.find("<rootfiles>")
+                if rloc == -1:
+                    print("Error: did not find <rootfiles> in container")
+                    return (opf_path, opf_data)
+                cs = cs[rloc + 3 :]
+                rloc = cs.find("<rootfile")
+                if rloc == -1:
+                    print("Error: did not find <rootfile in container")
+                    return (opf_path, opf_data)
+                cs = cs[rloc + 3 :]
+                rloc = cs.find("full-path=")
+                if rloc == -1:
+                    print("Error: did not find full-path in container")
+                    return (opf_path, opf_data)
+                cs = cs[rloc + 3 :]
+                opflist = cs.split('"')
+                opf_path = f"{opflist[1]}"  # d/d/d/fname
+                # print(f"opf_path: {opf_path}")
+                if opf_path == "":
+                    print(
+                        "Error: apparently opf file was not found. Return value was blank."
+                    )
+                    return (opf_path, opf_data)
+                # print(opf_path)
+                opf = opf_path.split("/")
+                # print(f"opf.split: {opf}; opf len: {len(opf)}")
+                opf_file = opf[len(opf) - 1]
+                opf = opf[: len(opf) - 1]
+                opf_path = ""
+                for d in opf:
+                    opf_path += f"{d}/"
+                # print(f"{opf_path} - {opf_file}; cat: {opf_path}/{opf_file}")
+                # with zfile.open(f"{opf_path}{opf_file}") as o:
+                with io.TextIOWrapper(
+                    zfile.open(f"{opf_path}{opf_file}"), encoding="utf-8"
+                ) as o:
+                    opf_data = o.read()
+                    # opf_data = str(opf_b)
+                return (opf_path, opf_data)# }}}
+
+
     def paginate_epub(self, source_epub) -> typing.Dict:
 
         """
@@ -2139,9 +2231,18 @@ class epub_paginator:
             self.rdict["error_lst"].append("Fatal error: Source epub not found.")
             self.rdict["pager_error"] = True
             return self.rdict
+        # file is valid, verify that it is not already paged by epubpager
+        ot = self.read_opf(source_epub)
+        opf_data = ot[1]
+        lem = opf_data.find('<meta name="tlbepubpager:modified"')
+        if lem != -1:
+            # self.wrlog(True,f"Fatal error: File already paginated")
+            self.rdict["error_lst"].append("This file is already paged by epubpager.")
+            self.rdict["pager_error"] = True
+            return self.rdict
 
         if not Path(self.outdir).is_dir:
-            self.wrlog(True,f"Fatal error: output directory does not exist: {self.outdir}")
+            # self.wrlog(True,f"Fatal error: output directory does not exist: {self.outdir}")
             self.rdict["error_lst"].append("Fatal error: output directory not found.")
             self.rdict["pager_error"] = True
             return self.rdict
@@ -2151,8 +2252,9 @@ class epub_paginator:
         self.rdict["title"] = stem_name.replace(".epub", "")
         self.logpath = Path(f"{self.outdir}/{self.rdict['title']}.log")
         self.rdict["logfile"] = self.logpath
+        print(f"Create log file: {self.logpath}")
         with self.logpath.open("w") as logfile:
-            logfile.write("" + "\n")
+            logfile.write("Creating log file." + "\n")
 
         self.wrlog(False, echk_message)
 
@@ -2312,9 +2414,9 @@ class epub_paginator:
                             f"{self.rdict['pgwords']} words per page."
                         ),
                     )
+        # this is the working loop. Scan each file, locate pages and insert
+        # page-links and/or pagelines or superscripts
         if self.genplist or self.pageline or self.superscript:
-            # this is the working loop. Scan each file, locate pages and insert
-            # page-links and/or pagelines or superscripts
             self.curpg = 1
             self.wrlog(False, "Begin pagination, scanning spine.")
             for chapter in self.rdict["spine_lst"]:

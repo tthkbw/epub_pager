@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # from ctypes import string_at
 # import sys
 import os
@@ -12,7 +12,6 @@ import io
 import copy
 
 import PySimpleGUI as sg
-import threading
 import json
 import base64
 import textwrap
@@ -30,6 +29,7 @@ from epubpager import epub_paginator
 Version = "0.3"
 
 """
+new stuff
 GUIepubpager.py based on CalibrePaginator.py
 Version = "0.3"
 
@@ -768,9 +768,22 @@ def get_cover(epubfile, coverpath, bname, opf_path, opf_data):# {{{
             LogWarning("get_cover Error: Did not find href")
             return "nocover"# }}}
 
+def get_tlbmeta(opf_data, loc):
+    '''
+    given opf_data and location of a name:tlbepubpager metadata, find the value of the item
+    form of xml lines:
+
+    <meta name="tlbepubpager:words" content="32772"/>
+    
+    '''
+    loc1 = opf_data[loc:].find(">")
+    mlist = opf_data[loc:loc + loc1].split('"')
+    # print(mlist)
+    return (mlist[3])
+
 def get_metaprop(opf_data, loc):
     '''
-    given opf_data and location of a dc:item, find the value of the iterm
+    given opf_data and location of a dc:item, find the value of the item
     form of xml lines:
     <meta property="dcterms:modified">2021-11-12T15:12:06Z</meta>
     Location is pinting to the property location, so we find '>' and then '<'
@@ -914,16 +927,19 @@ def fetch_tlb(opf_data):# {{{
     # epubpager meta data
     lew = opf_data.find('<meta name="tlbepubpager:words"')
     if lew != -1:
-        rdict['words'] = get_metaprop(opf_data, lew)
+        rdict['words'] = int(get_tlbmeta(opf_data, lew))
 
-    lep = opf_data.find('<meta name="tlbepubpager:words"')
+    lep = opf_data.find('<meta name="tlbepubpager:pages"')
     if lep != -1:
-        rdict['pages'] = get_metaprop(opf_data, lep)
+        rdict['pages'] = int(get_tlbmeta(opf_data, lep))
 
     lem = opf_data.find('<meta name="tlbepubpager:modified"')
     if lem != -1:
-        if lem != -1:
-            rdict['modified'] = get_metaprop(opf_data, lem)
+        v = get_tlbmeta(opf_data, lem)
+        if v == "True":
+            rdict['modified'] = True
+        else:
+            rdict['modified'] = False
     return rdict# }}}
 
 
@@ -1322,9 +1338,9 @@ def update_BookDataFrame():  # {{{
         window["-epPages-"].update(visible=True)
         window["-epWords-"].update(visible=True)
         window["-Pages-"].update(visible=True)
-        window["-Pages-"].update(f"{current_book['pages']:>7,d}")
+        window["-Pages-"].update(f"{int(current_book['pages']):>7,d}")
         window["-Words-"].update(visible=True)
-        window["-Words-"].update(f"{current_book['words']:>7,d}")
+        window["-Words-"].update(f"{int(current_book['words']):>7,d}")
     else:
         window["-epMetaData-"].update(visible=False)
         window["-epPages-"].update(visible=False)
@@ -2325,7 +2341,7 @@ while True:
         window.perform_long_operation(lambda : paginate_book(book_location), "-threadupdate-")
 
     # }}}
-    elif event == "-threadupdate-":
+    elif event == "-threadupdate-":# {{{
         # update the text field with the return data from paginate_book
         LogEvent(values[event])
         paginate_count -= 1
@@ -2340,8 +2356,6 @@ while True:
             window['-PaginateAll-'].update(visible=True)
             window['-Configure-'].update(visible=True)
             window['-About-'].update(visible=True)
-            window['-Help-'].update(visible=True)
             window['-Exit-'].update(visible=True)
-            window['-Find-'].update("Find")
+            window['-Find-'].update("Find")# }}}
 
-window.close()

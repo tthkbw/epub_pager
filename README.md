@@ -84,8 +84,9 @@ optional arguments:
   --pages PAGES         if = 0 use pgwords; else pgwords=(wordcount/pages)
   --pageline            generate and insert page pagelinesinto the ePub text
   --pl_align {right,left,center}
-                        'right', 'left' or 'center'; specify alignment of the
-                        pageline
+                        'right', 'left', 'center' or 'endp'; specify alignment of the
+                        pageline. If 'endp' page information is placed directly
+                        after paragraph end with no new line.
   --pl_color {red,blue,green,none}
                         html color for the inserted pageline
   --pl_bkt {<,(,none}   character to use to bracket page number
