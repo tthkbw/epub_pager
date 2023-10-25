@@ -236,6 +236,7 @@ def main():
             config["epubcheck"] = args.epubcheck
             config["chk_orig"] = args.chk_orig
             config["chk_paged"] = args.chk_paged
+            config["quiet"] = args.quiet
             config["DEBUG"] = args.DEBUG
             return dict(config)
 
